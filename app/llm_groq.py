@@ -65,11 +65,21 @@ class GroqLLM:
                 response.raise_for_status()
                 data = response.json()
 
+                # Get content from either content or reasoning field
+                # (reasoning models put response in 'reasoning' field)
+                message = data["choices"][0]["message"]
+                content = message.get("content") or message.get("reasoning", "")
+
+                # If still empty, log the full response for debugging
+                if not content:
+                    logger.warning(f"Groq returned empty response: {data}")
+                    content = "I apologize, but I couldn't generate a response. Please try again."
+
                 # Convert to our standard format
                 return {
                     "message": {
                         "role": "assistant",
-                        "content": data["choices"][0]["message"]["content"],
+                        "content": content,
                     }
                 }
 

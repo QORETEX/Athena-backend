@@ -80,7 +80,7 @@ class Settings(BaseSettings):
 
     # Groq API (fast and free alternative)
     groq_api_key: str = ""
-    groq_model: str = "llama-3.1-70b-versatile"  # Fast, free, powerful
+    groq_model: str = "openai/gpt-oss-20b"  # Fast, free, clean responses (Sept 2026)
 
     # NVIDIA NIM API (free AI models)
     nvidia_api_key: str = ""
