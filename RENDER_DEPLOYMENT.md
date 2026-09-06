@@ -21,7 +21,7 @@
    - **Branch:** `main`
    - **Root Directory:** Leave empty
    - **Runtime:** `Python 3`
-   - **Build Command:** `pip install -r requirements.txt`
+   - **Build Command:** `pip install -r requirements-production.txt`
    - **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`
 
 ---
@@ -163,7 +163,7 @@ services:
     name: athena-backend
     runtime: python
     plan: free  # or 'starter' for $7/month
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements-production.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
@@ -320,6 +320,15 @@ Should return:
 1. Render Dashboard → Your Service
 2. Click **"Manual Deploy"** → **"Deploy latest commit"**
 
+### ⚠️ Important Note
+The production build uses `requirements-production.txt` which excludes local-only features:
+- ❌ Ollama (use Groq/Claude APIs instead)
+- ❌ Whisper STT (local models)
+- ❌ Piper TTS (local models)
+- ❌ ChromaDB (local storage)
+- ❌ Face recognition, YOLO, OpenCV
+- ✅ All API-based features work (Groq, Claude, NVIDIA, Google APIs)
+
 ---
 
 ## Custom Domain (Optional)
@@ -412,7 +421,7 @@ DEBUG=false
 
 **Build Command:**
 ```
-pip install -r requirements.txt
+pip install -r requirements-production.txt
 ```
 
 **Start Command:**

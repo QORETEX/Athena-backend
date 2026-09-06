@@ -63,7 +63,11 @@ python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
+# For local development (includes all features):
 pip install -r requirements.txt
+
+# For production/Render (cloud-compatible only):
+# pip install -r requirements-production.txt
 
 # Copy environment variables
 cp .env.example .env
@@ -97,10 +101,14 @@ Swagger docs: **http://localhost:8000/docs**
 1. Go to [dashboard.render.com](https://dashboard.render.com/)
 2. Create new Web Service
 3. Connect this GitHub repository
-4. Add environment variables from `.env.production`
-5. Deploy!
+4. **Build Command:** `pip install -r requirements-production.txt`
+5. **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`
+6. Add environment variables from `.env.production`
+7. Deploy!
 
 **Cost: $0/month** (Render Free + Groq FREE + Neon FREE)
+
+> **Note:** Production uses `requirements-production.txt` which excludes local-only features (Ollama, Whisper, ChromaDB, face recognition, etc.). All API-based features work perfectly.
 
 See [RENDER_DEPLOYMENT.md](RENDER_DEPLOYMENT.md) for detailed instructions.
 
@@ -141,9 +149,10 @@ athena-backend/
 │   ├── llm_*.py         # LLM integrations (Claude, Groq, NVIDIA, Ollama)
 │   ├── db.py            # Database models (24 tables)
 │   └── config.py        # Configuration
-├── main.py              # FastAPI app entry point
-├── requirements.txt     # Python dependencies
-└── .env.example         # Environment variables template
+├── main.py                      # FastAPI app entry point
+├── requirements.txt             # Python dependencies (local dev)
+├── requirements-production.txt  # Python dependencies (production)
+└── .env.example                 # Environment variables template
 ```
 
 ---

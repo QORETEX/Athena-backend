@@ -1,0 +1,77 @@
+# ═══════════════════════════════════════════════════════════════
+# PRODUCTION REQUIREMENTS (Render-compatible)
+# Only cloud-compatible packages - no local ML models
+# ═══════════════════════════════════════════════════════════════
+
+# Core Web Framework
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+websockets==13.1
+python-multipart==0.0.12
+
+# Database (PostgreSQL only)
+sqlalchemy==2.0.35
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.9
+alembic==1.14.0
+
+# LLM API Clients (no local models)
+anthropic>=0.39.0
+
+# HTTP Client
+httpx==0.28.0
+aiohttp==3.11.10
+
+# Scheduling
+apscheduler==3.10.4
+
+# Document Processing
+pypdf==5.1.0
+python-docx==1.1.2
+openpyxl==3.1.5
+markdown==3.7
+
+# Image Processing (lightweight)
+Pillow==11.0.0
+
+# Utilities
+python-dotenv==1.0.1
+pydantic==2.10.3
+pydantic-settings>=2.6.0
+eval_type_backport>=0.2.0
+PyJWT[crypto]>=2.8.0
+passlib[bcrypt]==1.7.4
+python-dateutil==2.9.0.post0
+pytz==2024.2
+
+# Push Notifications
+exponent_server_sdk>=2.0.0
+
+# Google APIs (Gmail, Calendar, Maps)
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+google-auth-httplib2>=0.1.1
+google-api-python-client>=2.100.0
+
+# Image Generation (Gemini API)
+google-genai>=1.0.0
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.24.0
+
+# ═══════════════════════════════════════════════════════════════
+# EXCLUDED (Local-only features - don't work on Render):
+# ═══════════════════════════════════════════════════════════════
+# - ollama (local LLM - we use Groq/Claude APIs instead)
+# - faster-whisper (STT - requires local models)
+# - chromadb (vector DB - requires local storage)
+# - torch/torchvision/torchaudio (huge ML packages)
+# - piper-tts (TTS - requires local models)
+# - face-recognition (requires local models)
+# - ultralytics (YOLO - requires local models)
+# - opencv-python (computer vision - local only)
+# - silero-vad (VAD - requires local models)
+# - rnnoise-python (audio denoising - doesn't exist)
+# - sentence-transformers (embeddings - local only)
+# - diffusers/transformers (stable diffusion - local only)
