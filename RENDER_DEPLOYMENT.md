@@ -54,7 +54,7 @@ DATABASE_URL=postgresql+asyncpg://neondb_owner:npg_QinvghC6l3mk@ep-long-sky-aes9
 # LLM - At least ONE is required (Groq recommended - FREE)
 # ═══════════════════════════════════════════════════════════════
 GROQ_API_KEY=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
-GROQ_MODEL=openai/gpt-oss-120b
+GROQ_MODEL=openai/gpt-oss-20b
 
 # ═══════════════════════════════════════════════════════════════
 # SERVER CONFIGURATION
@@ -116,7 +116,7 @@ CLAUDE_MODEL=claude-3-5-haiku-20241022
 PYTHON_VERSION=3.11.9
 DATABASE_URL=postgresql+asyncpg://neondb_owner:npg_QinvghC6l3mk@ep-long-sky-aes9llxp-pooler.c-2.us-east-2.aws.neon.tech/neondb
 GROQ_API_KEY=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
-GROQ_MODEL=openai/gpt-oss-120b
+GROQ_MODEL=openai/gpt-oss-20b
 NVIDIA_API_KEY=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
 NVIDIA_MODEL=deepseek-v4-pro-0813
 HOST=0.0.0.0
@@ -188,7 +188,7 @@ services:
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_MODEL
-        value: openai/gpt-oss-120b
+        value: openai/gpt-oss-20b
       - key: HOST
         value: 0.0.0.0
       - key: LOG_LEVEL
@@ -431,7 +431,7 @@ Your Athena backend will be:
 PYTHON_VERSION=3.11.9
 DATABASE_URL=postgresql+asyncpg://neondb_owner:npg_QinvghC6l3mk@ep-long-sky-aes9llxp-pooler.c-2.us-east-2.aws.neon.tech/neondb
 GROQ_API_KEY=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
-GROQ_MODEL=openai/gpt-oss-120b
+GROQ_MODEL=openai/gpt-oss-20b
 HOST=0.0.0.0
 PORT=10000
 LOG_LEVEL=info
