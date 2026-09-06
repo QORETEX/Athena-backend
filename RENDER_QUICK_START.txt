@@ -18,6 +18,12 @@
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+⚠️ CRITICAL: ADD THIS FIRST!
+
+PYTHON_VERSION=3.11.9
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 DATABASE_URL=postgresql+asyncpg://neondb_owner:npg_QinvghC6l3mk@ep-long-sky-aes9llxp-pooler.c-2.us-east-2.aws.neon.tech/neondb
 
 GROQ_API_KEY=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

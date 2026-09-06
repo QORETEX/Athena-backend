@@ -36,6 +36,16 @@ Add these in Render Dashboard → Environment → Environment Variables:
 
 ```bash
 # ═══════════════════════════════════════════════════════════════
+# PYTHON VERSION (CRITICAL - Set this FIRST!)
+# ═══════════════════════════════════════════════════════════════
+PYTHON_VERSION=3.11.9
+
+# ⚠️ IMPORTANT: Render defaults to Python 3.14 which is too new!
+# SQLAlchemy and other packages don't support it yet.
+# You MUST set PYTHON_VERSION to 3.11.9 manually in Render dashboard.
+# runtime.txt does NOT work on Render (it's for Heroku only).
+
+# ═══════════════════════════════════════════════════════════════
 # DATABASE (REQUIRED)
 # ═══════════════════════════════════════════════════════════════
 DATABASE_URL=postgresql+asyncpg://neondb_owner:npg_QinvghC6l3mk@ep-long-sky-aes9llxp-pooler.c-2.us-east-2.aws.neon.tech/neondb
@@ -98,9 +108,12 @@ CLAUDE_MODEL=claude-3-5-haiku-20241022
 
 ## Step 3: Complete Environment Variables List for Copy-Paste
 
-**Copy this entire block and add to Render:**
+**⚠️ CRITICAL: Add PYTHON_VERSION first, then the rest!**
+
+**Copy each line and add to Render → Environment → Add Environment Variable:**
 
 ```
+PYTHON_VERSION=3.11.9
 DATABASE_URL=postgresql+asyncpg://neondb_owner:npg_QinvghC6l3mk@ep-long-sky-aes9llxp-pooler.c-2.us-east-2.aws.neon.tech/neondb
 GROQ_API_KEY=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
 GROQ_MODEL=openai/gpt-oss-120b
@@ -112,6 +125,8 @@ LOG_LEVEL=info
 DEBUG=false
 CLAUDE_MODEL=claude-3-5-haiku-20241022
 ```
+
+> **⚠️ IMPORTANT:** You must add each variable separately in Render dashboard using the "Add Environment Variable" button. Click the Key field, paste the key name, click the Value field, paste the value, then click "Add". Repeat for each variable.
 
 ---
 
@@ -189,6 +204,7 @@ services:
 ### By Priority
 
 #### 🔴 CRITICAL (App won't work without these)
+- `PYTHON_VERSION` - **MUST BE 3.11.9** (Render defaults to 3.14 which breaks!)
 - `DATABASE_URL` - Neon PostgreSQL connection string
 - `GROQ_API_KEY` - Groq LLM API key (FREE)
 
@@ -412,6 +428,7 @@ Your Athena backend will be:
 
 **Environment Variables (minimum required):**
 ```
+PYTHON_VERSION=3.11.9
 DATABASE_URL=postgresql+asyncpg://neondb_owner:npg_QinvghC6l3mk@ep-long-sky-aes9llxp-pooler.c-2.us-east-2.aws.neon.tech/neondb
 GROQ_API_KEY=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
 GROQ_MODEL=openai/gpt-oss-120b
@@ -420,6 +437,8 @@ PORT=10000
 LOG_LEVEL=info
 DEBUG=false
 ```
+
+> **⚠️ CRITICAL:** Set `PYTHON_VERSION=3.11.9` in Render dashboard BEFORE deploying! Render defaults to Python 3.14 which causes SQLAlchemy typing errors.
 
 **Build Command:**
 ```

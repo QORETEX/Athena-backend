@@ -1,0 +1,154 @@
+╔═══════════════════════════════════════════════════════════╗
+║    CRITICAL: MANUALLY SET PYTHON VERSION IN RENDER        ║
+╚═══════════════════════════════════════════════════════════╝
+
+🔴 PROBLEM:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Render is STILL using Python 3.14.3 (ignoring runtime.txt)
+Error: SQLAlchemy typing incompatible with Python 3.14
+TypeError: descriptor '__getitem__' requires a 'typing.Union' object
+
+❌ runtime.txt DOES NOT WORK on Render
+   (runtime.txt is for Heroku, not Render)
+
+✅ SOLUTION: Set Python version in Render Dashboard
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 1: Go to Render Dashboard
+──────────────────────────────────────────────────────────
+https://dashboard.render.com/
+
+STEP 2: Select Your Service
+──────────────────────────────────────────────────────────
+Click on "athena-backend" (or your service name)
+
+STEP 3: Go to Environment Settings
+──────────────────────────────────────────────────────────
+Left sidebar → Environment
+
+STEP 4: Add Environment Variable
+──────────────────────────────────────────────────────────
+Click "Add Environment Variable"
+
+Key:   PYTHON_VERSION
+Value: 3.11.9
+
+STEP 5: Save Changes
+──────────────────────────────────────────────────────────
+Click "Save Changes"
+
+STEP 6: Manual Deploy
+──────────────────────────────────────────────────────────
+Go to: Manual Deploy → "Deploy latest commit"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📸 VISUAL GUIDE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Dashboard → Your Service → Environment
+2. Scroll down to "Environment Variables" section
+3. Click "+ Add Environment Variable"
+4. Enter:
+   Key:   PYTHON_VERSION
+   Value: 3.11.9
+5. Click "Save Changes" (top right)
+6. Go to "Manual Deploy" tab
+7. Click "Deploy latest commit"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ COMPLETE ENVIRONMENT VARIABLES LIST:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Make sure you have ALL of these set:
+
+Key                Value
+─────────────────  ───────────────────────────────────────
+PYTHON_VERSION     3.11.9  ← ADD THIS!
+DATABASE_URL       postgresql+asyncpg://neondb_owner:npg_QinvghC6l3mk@ep-long-sky-aes9llxp-pooler.c-2.us-east-2.aws.neon.tech/neondb
+GROQ_API_KEY       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
+GROQ_MODEL         openai/gpt-oss-120b
+NVIDIA_API_KEY     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
+NVIDIA_MODEL       deepseek-v4-pro-0813
+CLAUDE_MODEL       claude-3-5-haiku-20241022
+HOST               0.0.0.0
+PORT               10000
+LOG_LEVEL          info
+DEBUG              false
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ IMPORTANT NOTES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❌ runtime.txt does NOT work on Render
+   (It's for Heroku only)
+
+✅ MUST use PYTHON_VERSION environment variable
+   This is the Render way to set Python version
+
+✅ Use Python 3.11.9 (not 3.12, not 3.14)
+   3.11 is stable and has all wheels
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎯 AFTER DEPLOY SUCCEEDS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Check logs - you should see:
+"Using Python version 3.11.9"
+
+NOT:
+"Using Python version 3.14.3"
+
+If you still see 3.14, the PYTHON_VERSION env var didn't save.
+Double-check it's set correctly and redeploy.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🧪 TEST AFTER SUCCESSFUL DEPLOY:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export URL=https://your-app.onrender.com
+
+# Health check
+curl $URL/health
+
+# Should return:
+{"status":"healthy","timestamp":"..."}
+
+# Chat test
+curl -X POST $URL/api/chat/text \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Hello","history":[],"tts":false}'
+
+# Should return JARVIS-style response!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💡 WHY THIS HAPPENS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Render uses the LATEST Python by default (3.14.3)
+Python 3.14 is brand new (released 2026)
+Most packages don't support it yet
+SQLAlchemy's typing system breaks on 3.14
+
+Solution: Use proven Python 3.11.9
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎯 DO THIS NOW:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Go to Render Dashboard
+2. Environment tab
+3. Add: PYTHON_VERSION = 3.11.9
+4. Save Changes
+5. Manual Deploy
+6. Wait 2-3 minutes
+7. Check logs for "Python 3.11.9"
+8. Test the API
+
+✅ THIS WILL FIX IT! 🚀
