@@ -1,0 +1,76 @@
+╔═══════════════════════════════════════════════════════════╗
+║          ATHENA BACKEND - RENDER DEPLOYMENT               ║
+║                  QUICK REFERENCE                          ║
+╚═══════════════════════════════════════════════════════════╝
+
+📋 STEP-BY-STEP:
+
+1. Go to: https://dashboard.render.com/
+2. Click: "New +" → "Web Service"
+3. Connect GitHub or upload directory
+4. Configure:
+   ├─ Name: athena-backend
+   ├─ Runtime: Python 3
+   ├─ Build: pip install -r requirements.txt
+   └─ Start: uvicorn main:app --host 0.0.0.0 --port $PORT
+
+5. Add Environment Variables (copy-paste these):
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+DATABASE_URL=postgresql+asyncpg://neondb_owner:npg_QinvghC6l3mk@ep-long-sky-aes9llxp-pooler.c-2.us-east-2.aws.neon.tech/neondb
+
+GROQ_API_KEY=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
+
+GROQ_MODEL=openai/gpt-oss-120b
+
+NVIDIA_API_KEY=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
+
+NVIDIA_MODEL=deepseek-v4-pro-0813
+
+CLAUDE_MODEL=claude-3-5-haiku-20241022
+
+HOST=0.0.0.0
+
+PORT=10000
+
+LOG_LEVEL=info
+
+DEBUG=false
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+6. Click "Create Web Service"
+7. Wait 5 minutes
+8. Test: https://your-app.onrender.com/health
+
+✅ DONE!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 COST: $0/month (Render Free + Groq FREE + Neon FREE)
+
+📝 NOTES:
+- Free tier spins down after 15 min inactivity
+- First request after sleep takes ~30 seconds
+- Upgrade to Starter ($7/mo) for always-on
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🧪 TEST YOUR DEPLOYMENT:
+
+curl https://your-app.onrender.com/health
+
+curl -X POST https://your-app.onrender.com/api/chat/text \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello", "history": [], "tts": false}'
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📱 UPDATE MOBILE APP:
+
+const API_URL = 'https://your-app.onrender.com';
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+For detailed guide: See RENDER_DEPLOYMENT.md

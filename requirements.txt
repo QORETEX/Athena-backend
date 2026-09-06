@@ -1,0 +1,86 @@
+# Core
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+websockets==13.1
+python-multipart==0.0.12
+
+# Database
+sqlalchemy==2.0.35
+aiosqlite>=0.20.0
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.9
+alembic==1.14.0
+
+# AI/ML Models
+ollama==0.4.4
+anthropic>=0.39.0
+faster-whisper==1.1.0
+sentence-transformers==3.3.1
+chromadb==0.5.20
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+
+# TTS
+piper-tts==1.2.0
+
+# Vision
+face-recognition==1.3.0
+face-recognition-models==0.3.0
+ultralytics==8.3.47
+pytesseract==0.3.13
+Pillow==11.0.0
+opencv-python==4.10.0.84
+
+# Audio Processing
+silero-vad==5.1.2
+rnnoise-python==1.0.2
+soundfile==0.12.1
+librosa==0.10.2.post1
+numpy>=1.24.4,<2.0
+scipy==1.14.1
+
+# Scheduling
+apscheduler==3.10.4
+
+# HTTP Client
+httpx==0.28.0
+aiohttp==3.11.10
+
+# Document Processing
+pypdf==5.1.0
+python-docx==1.1.2
+openpyxl==3.1.5
+markdown==3.7
+
+# Utilities
+python-dotenv==1.0.1
+pydantic==2.10.3
+pydantic-settings>=2.6.0
+eval_type_backport>=0.2.0
+PyJWT[crypto]>=2.8.0
+passlib[bcrypt]==1.7.4
+python-dateutil==2.9.0.post0
+pytz==2024.2
+
+# Push Notifications (Expo)
+exponent_server_sdk>=2.0.0
+
+# Google APIs (Gmail, Calendar, Maps)
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+google-auth-httplib2>=0.1.1
+google-api-python-client>=2.100.0
+
+# Image Generation
+google-genai>=1.0.0
+# Optional - Stable Diffusion fallback
+diffusers==0.31.0
+transformers==4.47.0
+accelerate==1.2.1
+
+# Development
+pytest==8.3.4
+pytest-asyncio==0.24.0
+black==24.10.0
+mypy==1.13.0
