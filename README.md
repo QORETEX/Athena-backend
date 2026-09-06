@@ -101,10 +101,11 @@ Swagger docs: **http://localhost:8000/docs**
 1. Go to [dashboard.render.com](https://dashboard.render.com/)
 2. Create new Web Service
 3. Connect this GitHub repository
-4. **Build Command:** `pip install -r requirements-production.txt`
-5. **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`
-6. Add environment variables from `.env.production`
-7. Deploy!
+4. **Runtime:** Python 3 (auto-detected from `runtime.txt`)
+5. **Build Command:** `pip install -r requirements-production.txt`
+6. **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`
+7. Add environment variables from `.env.production`
+8. Deploy!
 
 **Cost: $0/month** (Render Free + Groq FREE + Neon FREE)
 

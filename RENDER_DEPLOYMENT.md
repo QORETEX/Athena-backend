@@ -20,9 +20,11 @@
    - **Region:** Choose closest to you (e.g., Oregon, Ohio)
    - **Branch:** `main`
    - **Root Directory:** Leave empty
-   - **Runtime:** `Python 3`
+   - **Runtime:** `Python 3` (auto-detected from runtime.txt → Python 3.11.9)
    - **Build Command:** `pip install -r requirements-production.txt`
    - **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`
+   
+   > **Note:** We use Python 3.11.9 (specified in `runtime.txt`) because it has pre-built wheels for all packages. Python 3.14 is too new and requires building from source.
 
 ---
 
