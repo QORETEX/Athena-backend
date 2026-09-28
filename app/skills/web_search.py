@@ -34,7 +34,12 @@ async def handle_web_search(query: str) -> dict:
             {
                 "title": r.get("title", ""),
                 "url": r.get("url", ""),
-                "snippet": r.get("content", ""),
+                # Wrap snippet in tags so the LLM knows this is untrusted external content
+                "snippet": (
+                    "<untrusted_content source=\"web_search\">"
+                    + r.get("content", "")
+                    + "</untrusted_content>"
+                ),
             }
             for r in raw_results
         ],

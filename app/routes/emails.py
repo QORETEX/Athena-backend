@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Query, Path
+from fastapi import APIRouter, Query, Path, Request
 
+from app.config import get_settings
+from app.rate_limit import limiter
 from app.services.email_service import get_email_service
 
 logger = logging.getLogger(__name__)
@@ -26,7 +28,11 @@ Fetch recent emails from Gmail and store them in the database.
 
 **Use case:** Call this periodically or when user asks "check my emails"
 """)
-async def sync_emails(max_results: int = Query(20, description="Number of emails to fetch", ge=1, le=100)):
+@limiter.limit(get_settings().rate_limit_llm)
+async def sync_emails(
+    request: Request,
+    max_results: int = Query(20, description="Number of emails to fetch", ge=1, le=100),
+):
     """Sync recent emails from Gmail"""
     email_service = get_email_service()
     emails = await email_service.fetch_recent_emails(max_results)
@@ -69,8 +75,10 @@ Generate AI summary of an email using Claude.
 "Client wants to reschedule Thursday meeting to Friday 2 PM.
 They need updated proposal by Wednesday. No other changes to project scope."
 """)
+@limiter.limit(get_settings().rate_limit_llm)
 async def summarize_email(
-    email_id: int = Path(..., description="Email ID from database")
+    request: Request,
+    email_id: int = Path(..., description="Email ID from database"),
 ):
     """Get AI-powered summary of email"""
     email_service = get_email_service()

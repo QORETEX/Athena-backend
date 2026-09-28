@@ -9,7 +9,10 @@ from datetime import datetime, timezone
 import numpy as np
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from limits import parse as parse_rate_limit
+
 from app.config import get_settings
+from app.rate_limit import limiter
 from app.schemas import AssistantState, MessageType
 
 logger = logging.getLogger(__name__)
@@ -250,6 +253,16 @@ async def process_utterance(
         # 2. Think
         await set_state(ws, AssistantState.THINKING)
 
+        # Enforce the same per-IP LLM rate limit as HTTP routes
+        _rate_item = parse_rate_limit(get_settings().rate_limit_llm)
+        _client_ip = _get_ws_client_ip(ws)
+        if not limiter.limiter.hit(_rate_item, _client_ip):
+            await send_msg(ws, MessageType.ERROR, {
+                "message": "Rate limit exceeded. Please wait before sending another message."
+            })
+            await set_state(ws, AssistantState.IDLE)
+            return
+
         from app.llm import build_system_prompt, chat_with_tools
         from app.memory.store import get_memory_store
         from app.skills.base import get_ollama_tools, get_skill
@@ -321,7 +334,17 @@ async def process_utterance(
                     {"tool": tool_name, "result": result},
                 )
 
-                messages.append({"role": "tool", "content": json.dumps(result)})
+                tool_content = json.dumps(result)
+                # Client-executed skills return data from the user's device —
+                # treat it as untrusted to prevent prompt injection via crafted
+                # calendar events, contacts, etc.
+                if skill and skill.client_executed:
+                    tool_content = (
+                        f'<untrusted_content source="{tool_name}">'
+                        f"{tool_content}"
+                        f"</untrusted_content>"
+                    )
+                messages.append({"role": "tool", "content": tool_content})
 
             response = await chat_with_tools(messages, tools if tools else None)
             assistant_message = response.get("message", {})
@@ -403,9 +426,34 @@ async def _log_conversation(
 
 router = APIRouter()
 
+_WS_MAX_TEXT_BYTES = 64 * 1024  # 64 KB cap on individual text control messages
+
+# Per-IP concurrent connection tracking (asyncio is single-threaded; no lock needed)
+_ws_connections_per_ip: dict[str, int] = {}
+
+
+def _get_ws_client_ip(ws: WebSocket) -> str:
+    """Mirror of rate_limit.get_client_ip, adapted for WebSocket objects."""
+    settings = get_settings()
+    if settings.trust_proxy:
+        xff = ws.headers.get("x-forwarded-for", "")
+        if xff:
+            return xff.split(",")[-1].strip()
+    return (ws.client.host if ws.client else None) or "127.0.0.1"
+
 
 @router.websocket("/ws/voice")
 async def voice_endpoint(ws: WebSocket):
+    client_ip = _get_ws_client_ip(ws)
+    settings = get_settings()
+    current_conns = _ws_connections_per_ip.get(client_ip, 0)
+    if current_conns >= settings.ws_max_conn_per_ip:
+        # Must accept before closing per the WebSocket protocol
+        await ws.accept()
+        await ws.close(code=1008)  # 1008 = Policy Violation
+        return
+    _ws_connections_per_ip[client_ip] = current_conns + 1
+
     await ws.accept()
     logger.info("Voice WebSocket connected")
 
@@ -420,7 +468,14 @@ async def voice_endpoint(ws: WebSocket):
 
             # Binary frames = audio data
             if raw.get("type") == "websocket.receive" and "bytes" in raw and raw["bytes"]:
-                audio_buffer.extend(raw["bytes"])
+                incoming = raw["bytes"]
+                if len(audio_buffer) + len(incoming) > settings.ws_max_audio_bytes:
+                    await send_msg(ws, MessageType.ERROR, {
+                        "message": "Audio buffer limit exceeded (max 10 MB). Recording stopped."
+                    })
+                    await ws.close(code=1009)
+                    return
+                audio_buffer.extend(incoming)
                 if check_vad(audio_buffer):
                     data_copy = bytes(audio_buffer)
                     audio_buffer.clear()
@@ -437,6 +492,10 @@ async def voice_endpoint(ws: WebSocket):
             # Text frames = JSON control messages
             text = raw.get("text")
             if not text:
+                continue
+
+            if len(text.encode()) > _WS_MAX_TEXT_BYTES:
+                await send_msg(ws, MessageType.ERROR, {"message": "Text message too large"})
                 continue
 
             try:
@@ -491,6 +550,11 @@ async def voice_endpoint(ws: WebSocket):
     except Exception:
         logger.exception("Voice WebSocket error")
     finally:
+        count = _ws_connections_per_ip.get(client_ip, 1)
+        if count <= 1:
+            _ws_connections_per_ip.pop(client_ip, None)
+        else:
+            _ws_connections_per_ip[client_ip] = count - 1
         if current_task and not current_task.done():
             current_task.cancel()
         for future in client_tool_futures.values():

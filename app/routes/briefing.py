@@ -4,16 +4,18 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db import (
     BackgroundTask,
     Reminder,
     SmartHomeDevice,
     get_db,
 )
+from app.rate_limit import limiter
 from app.skills.base import Skill, register_skill
 
 logger = logging.getLogger(__name__)
@@ -171,7 +173,8 @@ async def get_briefing(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/summary")
-async def get_briefing_summary(db: AsyncSession = Depends(get_db)):
+@limiter.limit(get_settings().rate_limit_llm)
+async def get_briefing_summary(request: Request, db: AsyncSession = Depends(get_db)):
     """Generate a natural language summary of the briefing via Ollama."""
     briefing = await generate_briefing(db=db)
 

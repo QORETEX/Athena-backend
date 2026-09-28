@@ -7,11 +7,13 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db import get_db
+from app.rate_limit import limiter
 from app.services.quick_actions_service import QuickActionsService
 
 logger = logging.getLogger(__name__)
@@ -331,8 +333,9 @@ Should I create a quick action 'monday_start' to automate this?"
 
 **Use case:** Learn from behavior and suggest automation
 """)
+@limiter.limit(get_settings().rate_limit_llm)
 async def suggest_action(
-    user_behavior: Dict[str, Any] = Body(...), db: AsyncSession = Depends(get_db)
+    request: Request, user_behavior: Dict[str, Any] = Body(...), db: AsyncSession = Depends(get_db)
 ):
     """Get AI suggestion for custom action"""
     service = QuickActionsService(db)

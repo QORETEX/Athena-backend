@@ -6,6 +6,7 @@ import os
 from typing import AsyncGenerator, Generator
 
 import pytest
+import pytest_asyncio
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -26,7 +27,7 @@ def event_loop() -> Generator:
     loop.close()
 
 
-@pytest.fixture(scope="function")
+@pytest_asyncio.fixture(scope="function")
 async def test_db() -> AsyncGenerator[AsyncSession, None]:
     """Create a fresh test database for each test."""
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)
@@ -64,7 +65,7 @@ def client(override_get_db) -> TestClient:
     return TestClient(app)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def async_client(override_get_db) -> AsyncGenerator[AsyncClient, None]:
     """Create an async test client."""
     async with AsyncClient(app=app, base_url="http://test") as ac:

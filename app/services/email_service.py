@@ -4,9 +4,11 @@ Email Integration Service - Gmail API integration
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 from email.mime.text import MIMEText
 
@@ -38,17 +40,30 @@ class EmailService:
             from google_auth_oauthlib.flow import InstalledAppFlow
             from google.auth.transport.requests import Request
             from googleapiclient.discovery import build
-            import pickle
+            from app.config import get_settings
 
             SCOPES = ['https://www.googleapis.com/auth/gmail.readonly',
                       'https://www.googleapis.com/auth/gmail.send']
 
-            creds = None
-            token_path = 'token.pickle'
+            settings = get_settings()
+            token_dir = Path(settings.google_token_dir)
+            token_dir.mkdir(parents=True, exist_ok=True)
+            token_path = token_dir / "token_gmail.json"
 
-            if os.path.exists(token_path):
-                with open(token_path, 'rb') as token:
-                    creds = pickle.load(token)
+            # Refuse to load legacy pickle — re-auth required
+            legacy_pickle = Path("token.pickle")
+            if legacy_pickle.exists():
+                logger.warning(
+                    "Legacy token.pickle found. "
+                    "Re-authenticate to generate a safe JSON token. "
+                    "The pickle file will NOT be loaded."
+                )
+
+            creds = None
+            if token_path.exists():
+                creds = Credentials.from_authorized_user_info(
+                    json.loads(token_path.read_text()), SCOPES
+                )
 
             if not creds or not creds.valid:
                 if creds and creds.expired and creds.refresh_token:
@@ -62,8 +77,7 @@ class EmailService:
                         self.credentials_path, SCOPES)
                     creds = flow.run_local_server(port=0)
 
-                with open(token_path, 'wb') as token:
-                    pickle.dump(creds, token)
+                token_path.write_text(creds.to_json())
 
             self.gmail_service = build('gmail', 'v1', credentials=creds)
             logger.info("✅ Gmail API initialized")
@@ -250,14 +264,15 @@ class EmailService:
                 response = await claude.chat(
                     messages=[{
                         "role": "user",
-                        "content": f"""Summarize this email in 2-3 sentences:
-
-From: {email.sender}
-Subject: {email.subject}
-
-{email.body[:1000]}
-
-Provide a concise summary focusing on action items and key information."""
+                        "content": (
+                            "Summarize this email in 2-3 sentences, "
+                            "focusing on action items and key information.\n\n"
+                            f"From: {email.sender}\n"
+                            f"Subject: {email.subject}\n\n"
+                            "<untrusted_content source=\"email\">\n"
+                            f"{email.body[:1000]}\n"
+                            "</untrusted_content>"
+                        ),
                     }],
                     max_tokens=200
                 )

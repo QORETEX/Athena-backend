@@ -22,7 +22,9 @@
    - **Root Directory:** Leave empty
    - **Runtime:** `Python 3` (auto-detected from runtime.txt → Python 3.11.9)
    - **Build Command:** `pip install -r requirements-production.txt`
-   - **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`
+   - **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'`
+   
+   > **XFF / rate-limit note:** `--proxy-headers --forwarded-allow-ips='*'` makes uvicorn rewrite `request.client.host` from `X-Forwarded-For`, but it uses the **leftmost** entry — which clients can spoof. Athena ignores that rewritten value and instead reads the **rightmost** XFF entry directly from the header when `TRUST_PROXY=true`. Render always appends the real client IP as the rightmost entry, so setting `TRUST_PROXY=true` (below) is what actually makes rate limits key on the real IP.
    
    > **Note:** We use Python 3.11.9 (specified in `runtime.txt`) because it has pre-built wheels for all packages. Python 3.14 is too new and requires building from source.
 
@@ -48,12 +50,12 @@ PYTHON_VERSION=3.11.9
 # ═══════════════════════════════════════════════════════════════
 # DATABASE (REQUIRED)
 # ═══════════════════════════════════════════════════════════════
-DATABASE_URL=postgresql+asyncpg://neondb_owner:npg_QinvghC6l3mk@ep-long-sky-aes9llxp-pooler.c-2.us-east-2.aws.neon.tech/neondb
+DATABASE_URL=<REDACTED — set in Render dashboard>
 
 # ═══════════════════════════════════════════════════════════════
 # LLM - At least ONE is required (Groq recommended - FREE)
 # ═══════════════════════════════════════════════════════════════
-GROQ_API_KEY=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
+GROQ_API_KEY=<REDACTED — set in Render dashboard>
 GROQ_MODEL=openai/gpt-oss-20b
 
 # ═══════════════════════════════════════════════════════════════
@@ -63,6 +65,11 @@ HOST=0.0.0.0
 PORT=10000
 LOG_LEVEL=info
 DEBUG=false
+
+# ═══════════════════════════════════════════════════════════════
+# SECURITY — rate limiting uses rightmost XFF (real client IP)
+# ═══════════════════════════════════════════════════════════════
+TRUST_PROXY=true
 ```
 
 ### ⚠️ OPTIONAL (Add if you have them)
@@ -71,7 +78,7 @@ DEBUG=false
 # ───────────────────────────────────────────────────────────────
 # Additional LLM Providers (for redundancy)
 # ───────────────────────────────────────────────────────────────
-NVIDIA_API_KEY=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
+NVIDIA_API_KEY=<REDACTED — set in Render dashboard>
 NVIDIA_MODEL=deepseek-v4-pro-0813
 
 ANTHROPIC_API_KEY=
@@ -114,16 +121,17 @@ CLAUDE_MODEL=claude-3-5-haiku-20241022
 
 ```
 PYTHON_VERSION=3.11.9
-DATABASE_URL=postgresql+asyncpg://neondb_owner:npg_QinvghC6l3mk@ep-long-sky-aes9llxp-pooler.c-2.us-east-2.aws.neon.tech/neondb
-GROQ_API_KEY=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
+DATABASE_URL=<REDACTED — set in Render dashboard>
+GROQ_API_KEY=<REDACTED — set in Render dashboard>
 GROQ_MODEL=openai/gpt-oss-20b
-NVIDIA_API_KEY=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
+NVIDIA_API_KEY=<REDACTED — set in Render dashboard>
 NVIDIA_MODEL=deepseek-v4-pro-0813
 HOST=0.0.0.0
 PORT=10000
 LOG_LEVEL=info
 DEBUG=false
 CLAUDE_MODEL=claude-3-5-haiku-20241022
+TRUST_PROXY=true
 ```
 
 > **⚠️ IMPORTANT:** You must add each variable separately in Render dashboard using the "Add Environment Variable" button. Click the Key field, paste the key name, click the Value field, paste the value, then click "Add". Repeat for each variable.
@@ -181,7 +189,7 @@ services:
     runtime: python
     plan: free  # or 'starter' for $7/month
     buildCommand: pip install -r requirements-production.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'
     envVars:
       - key: DATABASE_URL
         sync: false  # Set manually in dashboard
@@ -429,13 +437,14 @@ Your Athena backend will be:
 **Environment Variables (minimum required):**
 ```
 PYTHON_VERSION=3.11.9
-DATABASE_URL=postgresql+asyncpg://neondb_owner:npg_QinvghC6l3mk@ep-long-sky-aes9llxp-pooler.c-2.us-east-2.aws.neon.tech/neondb
-GROQ_API_KEY=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
+DATABASE_URL=<REDACTED — set in Render dashboard>
+GROQ_API_KEY=<REDACTED — set in Render dashboard>
 GROQ_MODEL=openai/gpt-oss-20b
 HOST=0.0.0.0
 PORT=10000
 LOG_LEVEL=info
 DEBUG=false
+TRUST_PROXY=true
 ```
 
 > **⚠️ CRITICAL:** Set `PYTHON_VERSION=3.11.9` in Render dashboard BEFORE deploying! Render defaults to Python 3.14 which causes SQLAlchemy typing errors.
@@ -447,7 +456,7 @@ pip install -r requirements-production.txt
 
 **Start Command:**
 ```
-uvicorn main:app --host 0.0.0.0 --port $PORT
+uvicorn main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'
 ```
 
 **That's it!** 🚀

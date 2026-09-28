@@ -12,7 +12,7 @@ from typing import Optional
 from anthropic import AsyncAnthropic
 
 from app.config import get_settings
-from app.llm import chat_with_tools as ollama_chat_with_tools
+from app.llm import SECURITY_INSTRUCTION, chat_with_tools as ollama_chat_with_tools
 
 logger = logging.getLogger(__name__)
 
@@ -124,11 +124,15 @@ class ClaudeLLM:
         if tools:
             claude_tools = self._convert_tools_to_claude(tools)
 
-        # Call Claude
+        # Call Claude — always include the SECURITY instruction so direct callers
+        # (wellness, journal, learning, etc.) are also protected against prompt
+        # injection from external content they forward to Claude.
+        if not system_prompt:
+            system_prompt = SECURITY_INSTRUCTION
         response = await self.client.messages.create(
             model=self.settings.claude_model,
             max_tokens=max_tokens,
-            system=system_prompt or "You are Athena, a helpful AI assistant.",
+            system=system_prompt,
             messages=conversation,
             tools=claude_tools or []
         )

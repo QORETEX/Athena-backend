@@ -1,12 +1,15 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 
 from app.config import get_settings
 from app.db import init_db
 from app.logging_config import setup_logging
+from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -75,10 +78,24 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Attach the rate limiter and its 429 error handler
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(status_code=429, content={"detail": str(exc)})
+
+
+_settings = get_settings()
+_cors_origins = [o.strip() for o in _settings.cors_origins.split(",") if o.strip()]
+
+# allow_credentials requires an explicit origin list (not "*") per the CORS spec.
+# This app does not use cookies, so credentials are disabled.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

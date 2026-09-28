@@ -8,11 +8,13 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db import get_db
+from app.rate_limit import limiter
 from app.services.relationship_service import RelationshipService
 
 logger = logging.getLogger(__name__)
@@ -307,7 +309,9 @@ Get contacts that need follow-up.
 
 **Use case:** Maintain relationships automatically
 """)
+@limiter.limit(get_settings().rate_limit_llm)
 async def get_followups(
+    request: Request,
     days: int = Query(30, description="Days since last contact"),
     db: AsyncSession = Depends(get_db),
 ):

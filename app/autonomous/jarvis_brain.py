@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.db import async_session, Reminder, Note
+from app.llm import SECURITY_INSTRUCTION
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ Respond ONLY with valid JSON:
 }
 
 Current context will be provided. Analyze and decide.
-"""
+""" + SECURITY_INSTRUCTION
 
 
 class JARVISBrain:

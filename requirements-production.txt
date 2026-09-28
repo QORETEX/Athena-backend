@@ -9,10 +9,11 @@ uvicorn[standard]==0.32.1
 websockets==13.1
 python-multipart==0.0.12
 
-# Database (PostgreSQL only)
+# Database
 sqlalchemy==2.0.35
+slowapi==0.1.9
 asyncpg>=0.29.0
-psycopg2-binary>=2.9.9
+aiosqlite>=0.20.0
 alembic==1.14.0
 
 # LLM API Clients (no local models)

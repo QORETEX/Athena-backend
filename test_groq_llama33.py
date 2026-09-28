@@ -4,7 +4,7 @@ import httpx
 import json
 
 async def test_groq():
-    api_key = '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'
+    api_key = '<REDACTED — set GROQ_API_KEY in env>'
     model = 'llama-3.3-70b-versatile'
     
     print(f"Testing Groq with model: {model}\n")

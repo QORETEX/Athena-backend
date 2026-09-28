@@ -29,6 +29,19 @@ ENV/
 .env
 .env.local
 .env.*.local
+.env.*
+!.env.example
+.env.production
+
+# OAuth token files (contain live refresh tokens — never commit)
+token*.pickle
+token*.json
+
+# Google OAuth token storage (JSON replacements for pickle tokens)
+secrets/
+
+# Audit report
+AUDIT.md
 
 # Database
 *.db
@@ -67,3 +80,4 @@ models/
 tmp/
 temp/
 *.tmp
+.venv/

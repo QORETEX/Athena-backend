@@ -86,6 +86,28 @@ class Settings(BaseSettings):
     nvidia_api_key: str = ""
     nvidia_model: str = "nvidia/llama-3.1-nemotron-70b-instruct"  # Free, high quality
 
+    # CORS — comma-separated list of allowed frontend origins
+    cors_origins: str = "http://localhost:3000,http://localhost:8081,http://localhost:19006"
+
+    # Google OAuth token storage directory
+    google_token_dir: str = "./secrets"
+
+    # WebSocket audio buffer size limit (bytes)
+    ws_max_audio_bytes: int = 10 * 1024 * 1024  # 10 MB
+
+    # Rate limiting for LLM/external-API routes
+    rate_limit_llm: str = "20/minute"
+    # Stricter limit for image generation (Gemini/SD are expensive)
+    rate_limit_image: str = "5/minute"
+
+    # Proxy trust — set true only when behind Render/trusted reverse proxy.
+    # When true, the RIGHTMOST X-Forwarded-For entry is used as the client IP
+    # (Render appends the real IP there).  When false, X-Forwarded-For is ignored.
+    trust_proxy: bool = False
+
+    # Max concurrent /ws/voice connections per client IP
+    ws_max_conn_per_ip: int = 3
+
 
 @lru_cache
 def get_settings() -> Settings:

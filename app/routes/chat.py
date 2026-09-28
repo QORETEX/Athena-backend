@@ -5,12 +5,14 @@ import base64
 import json
 import logging
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from pydantic import BaseModel
 
+from app.config import get_settings
 from app.llm import build_system_prompt, chat_with_tools
 from app.llm_claude import get_claude_llm
 from app.memory.store import get_memory_store
+from app.rate_limit import limiter
 from app.skills.base import get_ollama_tools, get_skill
 
 logger = logging.getLogger(__name__)
@@ -149,7 +151,8 @@ async def _get_tts_audio(text: str) -> str | None:
 
 
 @router.post("/text", response_model=TextChatResponse)
-async def text_chat(body: TextChatRequest):
+@limiter.limit(get_settings().rate_limit_llm)
+async def text_chat(request: Request, body: TextChatRequest):
     """Text chat with Athena. Set tts=true to also get the reply as audio."""
 
     reply, tool_calls, tool_results, error = await _run_chat_pipeline(
@@ -170,7 +173,9 @@ async def text_chat(body: TextChatRequest):
 
 
 @router.post("/audio", response_model=AudioChatResponse)
+@limiter.limit(get_settings().rate_limit_llm)
 async def audio_chat(
+    request: Request,
     audio: UploadFile = File(..., description="Audio file (WAV or raw PCM, 16kHz 16-bit mono)"),
     history: str = Form(default="[]", description="JSON array of past messages"),
     tts: bool = Form(default=True, description="Return reply as audio"),

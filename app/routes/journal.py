@@ -6,11 +6,13 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, UploadFile, File, Form, Query, Path
+from fastapi import APIRouter, UploadFile, File, Form, Query, Path, Request
 from pydantic import BaseModel
 from sqlalchemy import select, or_
 
+from app.config import get_settings
 from app.db import async_session, JournalEntry
+from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +43,8 @@ Athena: "Entry saved. Tagged: work, success, API"
 
 **Returns:** Entry ID and AI-generated summary
 """)
-async def create_journal_entry(entry: JournalEntryRequest):
+@limiter.limit(get_settings().rate_limit_llm)
+async def create_journal_entry(request: Request, entry: JournalEntryRequest):
     """Create a new journal entry"""
     async with async_session() as session:
         # Extract key points using Claude
@@ -84,7 +87,9 @@ Create journal entry from voice recording.
 → Transcribed, analyzed, tagged automatically
 → "Saved 3 key ideas from your note about the mobile app redesign"
 """)
+@limiter.limit(get_settings().rate_limit_llm)
 async def create_voice_journal_entry(
+    request: Request,
     audio: UploadFile = File(..., description="Audio file (WAV/MP3/M4A)"),
     tags: str = Form("[]", description="Optional tags as JSON array")
 ):
@@ -225,8 +230,10 @@ Get full details of a specific journal entry.
 - Key points
 - Related entries (if any)
 """)
+@limiter.limit(get_settings().rate_limit_llm)
 async def get_journal_entry(
-    entry_id: int = Path(..., description="Journal entry ID")
+    request: Request,
+    entry_id: int = Path(..., description="Journal entry ID"),
 ):
     """Get full journal entry"""
     async with async_session() as session:

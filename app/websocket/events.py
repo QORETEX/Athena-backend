@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _event_clients: set[WebSocket] = set()
+_WS_MAX_TEXT_BYTES = 64 * 1024  # 64 KB cap on individual text messages
 
 
 # ── WebSocket endpoint ────────────────────────────────────
@@ -27,6 +28,9 @@ async def events_endpoint(ws: WebSocket):
     try:
         while True:
             text = await ws.receive_text()
+            if len(text.encode()) > _WS_MAX_TEXT_BYTES:
+                await ws.send_json({"type": "error", "payload": {"message": "Message too large"}})
+                continue
             if text == "ping":
                 await ws.send_json(
                     {"type": MessageType.PONG.value, "payload": {}}

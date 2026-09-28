@@ -7,11 +7,13 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db import get_db
+from app.rate_limit import limiter
 from app.services.automation_service import AutomationService
 
 logger = logging.getLogger(__name__)
@@ -293,7 +295,9 @@ AI-powered automation suggestions based on user patterns.
 **JARVIS use:** Proactively suggests useful automations
 "Sir, I noticed you always do X when Y. Should I automate this?"
 """)
+@limiter.limit(get_settings().rate_limit_llm)
 async def suggest_automation(
+    request: Request,
     pattern: Dict[str, Any] = Body(...),
     context: Dict[str, Any] = Body(...),
     db: AsyncSession = Depends(get_db),

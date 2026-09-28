@@ -7,11 +7,13 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db import get_db
+from app.rate_limit import limiter
 from app.services.learning_service import LearningService
 
 logger = logging.getLogger(__name__)
@@ -249,8 +251,9 @@ Query knowledge base with natural language.
 
 **Use case:** Natural conversation about yourself
 """)
+@limiter.limit(get_settings().rate_limit_llm)
 async def query_knowledge(
-    query: KnowledgeQuery, db: AsyncSession = Depends(get_db)
+    request: Request, query: KnowledgeQuery, db: AsyncSession = Depends(get_db)
 ):
     """Query knowledge with natural language"""
     service = LearningService(db)
@@ -288,8 +291,11 @@ Should I remember these?"
 
 **Effect:** Passive learning from natural conversation
 """)
+@limiter.limit(get_settings().rate_limit_llm)
 async def extract_from_conversation(
-    conversation: str = Body(..., embed=True), db: AsyncSession = Depends(get_db)
+    request: Request,
+    conversation: str = Body(..., embed=True),
+    db: AsyncSession = Depends(get_db),
 ):
     """Extract knowledge from conversation"""
     service = LearningService(db)
@@ -371,8 +377,9 @@ JARVIS: "Understood. I'll remember you're allergic to peanuts and won't suggest 
 
 **Use case:** Natural voice teaching without structured JSON
 """)
+@limiter.limit(get_settings().rate_limit_llm)
 async def teach_from_voice(
-    command: str = Body(..., embed=True), db: AsyncSession = Depends(get_db)
+    request: Request, command: str = Body(..., embed=True), db: AsyncSession = Depends(get_db)
 ):
     """Parse and teach from natural voice command"""
     service = LearningService(db)
