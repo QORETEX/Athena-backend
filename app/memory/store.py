@@ -17,7 +17,7 @@ try:
     CHROMA_AVAILABLE = True
     logger.info("ChromaDB loaded — memory enabled")
 except ImportError:
-    logger.warning("ChromaDB not available — memory disabled")
+    logger.info("ChromaDB not available — memory disabled")
 
 
 class MemoryStore:

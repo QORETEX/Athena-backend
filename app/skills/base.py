@@ -1,6 +1,6 @@
 import json
-from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from dataclasses import dataclass
+from typing import Any, Callable, Optional, Union
 
 
 @dataclass
@@ -15,12 +15,20 @@ class Skill:
     # LLM should not treat as instructions (web snippets, calendar event titles,
     # user-uploaded documents, client-device data, etc.)
     returns_external_content: bool = False
-    # When set, called at tool-list build time to decide whether to offer this
-    # skill to the LLM.  None means always offer.  Examples:
-    #   web_search   → lambda: get_settings().web_search_enabled
-    #   smart_home   → lambda: get_settings().smart_home_enabled
-    #   image_gen    → lambda: get_settings().image_gen_enabled
+    # Called at tool-list build time; None means always offer.
     enabled_check: Optional[Callable[[], bool]] = None
+    # Shown in startup log when is_available() is False. Can be a static string
+    # or a callable for reasons that depend on current config (e.g. which key is missing).
+    unavailable_reason: Union[str, Callable[[], str]] = ""
+
+    def is_available(self) -> bool:
+        """True when this skill should be offered to the LLM."""
+        return self.enabled_check is None or self.enabled_check()
+
+    def get_unavailable_reason(self) -> str:
+        if callable(self.unavailable_reason):
+            return self.unavailable_reason()
+        return self.unavailable_reason
 
 
 _registry: dict[str, Skill] = {}
@@ -50,7 +58,7 @@ def serialize_tool_result(skill: Optional[Skill], tool_name: str, result: object
 
 
 def get_ollama_tools() -> list[dict]:
-    """Return tool descriptors for all currently-enabled skills."""
+    """Return tool descriptors for all currently-available skills."""
     return [
         {
             "type": "function",
@@ -61,5 +69,5 @@ def get_ollama_tools() -> list[dict]:
             },
         }
         for s in _registry.values()
-        if s.enabled_check is None or s.enabled_check()
+        if s.is_available()
     ]

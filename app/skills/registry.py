@@ -19,4 +19,17 @@ from app.skills import (  # noqa: E402, F401
 
 from app.skills.base import get_all_skills  # noqa: E402
 
-logger.info("Registered %d skills: %s", len(get_all_skills()), list(get_all_skills().keys()))
+_skills = get_all_skills()
+
+_available = [name for name, s in _skills.items() if s.is_available()]
+_unavailable = [
+    f"{name} ({s.get_unavailable_reason()})"
+    for name, s in _skills.items()
+    if not s.is_available()
+]
+
+logger.info("Available skills (%d): %s", len(_available), ", ".join(_available))
+logger.info(
+    "Unavailable skills: %s",
+    ", ".join(_unavailable) if _unavailable else "none",
+)

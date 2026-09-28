@@ -29,7 +29,7 @@ try:
     WHISPER_AVAILABLE = True
     logger.info("faster-whisper available")
 except ImportError:
-    logger.warning("faster-whisper not installed — STT disabled")
+    logger.info("faster-whisper not installed — STT disabled")
 
 try:
     from piper import PiperVoice
@@ -37,7 +37,7 @@ try:
     PIPER_AVAILABLE = True
     logger.info("piper-tts available")
 except ImportError:
-    logger.warning("piper-tts not installed — TTS disabled")
+    logger.info("piper-tts not installed — TTS disabled")
 
 try:
     import torch
@@ -45,7 +45,7 @@ try:
     VAD_AVAILABLE = True
     logger.info("torch available — VAD enabled")
 except ImportError:
-    logger.warning("torch not installed — VAD disabled, relying on client audio_end")
+    logger.info("torch not installed — VAD disabled, relying on client audio_end")
 
 # ── Lazy model singletons ───────────────────────────────────────────────────
 

@@ -68,5 +68,6 @@ register_skill(
         returns_external_content=True,
         # Offered to the LLM only when SearXNG is configured.
         enabled_check=lambda: get_settings().web_search_enabled,
+        unavailable_reason="SEARXNG_URL not set",
     )
 )

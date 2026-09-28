@@ -21,7 +21,6 @@ try:
     from google.genai import types
 
     GEMINI_AVAILABLE = True
-    logger.info("google-genai available — Gemini image gen enabled")
 except ImportError:
     logger.info("google-genai not installed — Gemini image gen disabled")
 
@@ -29,11 +28,53 @@ try:
     from diffusers import StableDiffusionPipeline  # noqa: F401
 
     DIFFUSERS_AVAILABLE = True
-    logger.info("diffusers available — Stable Diffusion fallback enabled")
+    logger.info("diffusers installed — Stable Diffusion fallback available")
 except ImportError:
     logger.info("diffusers not installed — Stable Diffusion fallback disabled")
 
+# Gemini startup diagnostic: library presence alone is not "enabled" —
+# all three config values must also be set.
+if GEMINI_AVAILABLE:
+    _s = get_settings()
+    if not _s.image_gen_enabled:
+        logger.info("google-genai installed but IMAGE_GEN_ENABLED=false — image gen disabled")
+    elif not _s.gemini_api_key:
+        logger.warning("IMAGE_GEN_ENABLED=true but GEMINI_API_KEY not set — Gemini image gen disabled")
+    elif not _s.gemini_image_model:
+        logger.warning("IMAGE_GEN_ENABLED=true but GEMINI_IMAGE_MODEL not set — Gemini image gen disabled")
+    else:
+        logger.info("Gemini image gen enabled")
+    del _s
+
 _sd_pipeline = None
+
+
+# ── Availability helpers ───────────────────────────────────
+
+
+def _image_gen_available() -> bool:
+    settings = get_settings()
+    if not settings.image_gen_enabled:
+        return False
+    gemini_ready = (
+        GEMINI_AVAILABLE
+        and bool(settings.gemini_api_key)
+        and bool(settings.gemini_image_model)
+    )
+    return gemini_ready or DIFFUSERS_AVAILABLE
+
+
+def _image_gen_unavailable_reason() -> str:
+    settings = get_settings()
+    if not settings.image_gen_enabled:
+        return "IMAGE_GEN_ENABLED=false"
+    if not GEMINI_AVAILABLE and not DIFFUSERS_AVAILABLE:
+        return "google-genai and diffusers not installed"
+    if GEMINI_AVAILABLE and not settings.gemini_api_key:
+        return "GEMINI_API_KEY not set"
+    if GEMINI_AVAILABLE and not settings.gemini_image_model:
+        return "GEMINI_IMAGE_MODEL not set"
+    return "no image backend configured"
 
 
 # ── Gemini image generation ────────────────────────────────
@@ -164,7 +205,7 @@ register_skill(
         },
         handler=handle_image_gen,
         timeout=120,
-        # Offered to the LLM only when IMAGE_GEN_ENABLED=true.
-        enabled_check=lambda: get_settings().image_gen_enabled,
+        enabled_check=_image_gen_available,
+        unavailable_reason=_image_gen_unavailable_reason,
     )
 )

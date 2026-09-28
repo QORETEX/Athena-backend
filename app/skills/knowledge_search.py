@@ -1,5 +1,6 @@
 import logging
 
+from app.knowledge.ingest import CHROMA_AVAILABLE
 from app.skills.base import Skill, register_skill
 
 logger = logging.getLogger(__name__)
@@ -36,5 +37,7 @@ register_skill(
         },
         handler=handle_knowledge_search,
         returns_external_content=True,
+        enabled_check=lambda: CHROMA_AVAILABLE,
+        unavailable_reason="chromadb not installed",
     )
 )

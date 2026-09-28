@@ -59,5 +59,6 @@ register_skill(
         timeout=15,
         # Offered to the LLM only when HASS_URL and HASS_TOKEN are both set.
         enabled_check=lambda: get_settings().smart_home_enabled,
+        unavailable_reason="HASS_URL and HASS_TOKEN not set",
     )
 )

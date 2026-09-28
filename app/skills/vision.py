@@ -203,6 +203,8 @@ register_skill(
         },
         handler=handle_vision,
         timeout=60,
+        enabled_check=lambda: FACE_RECOGNITION_AVAILABLE or YOLO_AVAILABLE or TESSERACT_AVAILABLE,
+        unavailable_reason="face_recognition, ultralytics, pytesseract not installed",
     )
 )
 
@@ -226,5 +228,7 @@ register_skill(
         },
         handler=handle_register_face,
         timeout=30,
+        enabled_check=lambda: FACE_RECOGNITION_AVAILABLE,
+        unavailable_reason="face_recognition not installed",
     )
 )
