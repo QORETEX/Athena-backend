@@ -263,7 +263,17 @@ async def process_utterance(
             await set_state(ws, AssistantState.IDLE)
             return
 
-        from app.llm import build_system_prompt, chat_with_tools
+        # Guard: no provider configured
+        if not get_settings().any_llm_configured:
+            await send_msg(ws, MessageType.ERROR, {
+                "code": "no_llm_available",
+                "message": "No LLM provider is configured.",
+            })
+            await set_state(ws, AssistantState.IDLE)
+            return
+
+        from app.llm import build_system_prompt
+        from app.llm_claude import get_claude_llm
         from app.memory.store import get_memory_store
         from app.skills.base import get_ollama_tools, get_skill, serialize_tool_result
 
@@ -281,7 +291,16 @@ async def process_utterance(
         messages.append({"role": "user", "content": transcript})
 
         tools = get_ollama_tools()
-        response = await chat_with_tools(messages, tools if tools else None)
+        claude = get_claude_llm()
+        response = await claude.chat(messages, tools if tools else None)
+
+        if response.get("error") == "llm_providers_failed":
+            await send_msg(ws, MessageType.ERROR, {
+                "code": "llm_providers_failed",
+                "message": response.get("message", {}).get("content", "All LLM providers failed"),
+            })
+            await set_state(ws, AssistantState.IDLE)
+            return
 
         assistant_message = response.get("message", {})
 
@@ -336,7 +355,7 @@ async def process_utterance(
 
                 messages.append({"role": "tool", "content": serialize_tool_result(skill, tool_name, result)})
 
-            response = await chat_with_tools(messages, tools if tools else None)
+            response = await claude.chat(messages, tools if tools else None)
             assistant_message = response.get("message", {})
 
         # 4. Extract reply text

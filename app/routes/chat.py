@@ -70,7 +70,6 @@ async def _run_chat_pipeline(
 
     tools = get_ollama_tools()
 
-    # Use Claude as primary, Ollama as fallback
     claude = get_claude_llm()
     response = await claude.chat(messages, tools if tools else None)
 
@@ -157,16 +156,28 @@ async def text_chat(request: Request, body: TextChatRequest):
     if not get_settings().any_llm_configured:
         raise HTTPException(
             status_code=503,
-            detail=(
-                "No LLM provider is configured. "
-                "Set at least one of: ANTHROPIC_API_KEY, GROQ_API_KEY, "
-                "NVIDIA_API_KEY, or OLLAMA_BASE_URL."
-            ),
+            detail={
+                "error": "no_llm_available",
+                "message": (
+                    "No LLM provider is configured. "
+                    "Set at least one of: ANTHROPIC_API_KEY, GROQ_API_KEY, "
+                    "NVIDIA_API_KEY, or OLLAMA_BASE_URL."
+                ),
+            },
         )
 
     reply, tool_calls, tool_results, error = await _run_chat_pipeline(
         body.message, body.history
     )
+
+    if error == "llm_providers_failed":
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "llm_providers_failed",
+                "message": reply,
+            },
+        )
 
     audio_b64 = None
     if body.tts and not error:
@@ -193,11 +204,14 @@ async def audio_chat(
     if not get_settings().any_llm_configured:
         raise HTTPException(
             status_code=503,
-            detail=(
-                "No LLM provider is configured. "
-                "Set at least one of: ANTHROPIC_API_KEY, GROQ_API_KEY, "
-                "NVIDIA_API_KEY, or OLLAMA_BASE_URL."
-            ),
+            detail={
+                "error": "no_llm_available",
+                "message": (
+                    "No LLM provider is configured. "
+                    "Set at least one of: ANTHROPIC_API_KEY, GROQ_API_KEY, "
+                    "NVIDIA_API_KEY, or OLLAMA_BASE_URL."
+                ),
+            },
         )
 
     try:
@@ -240,6 +254,15 @@ async def audio_chat(
     reply, tool_calls, tool_results, error = await _run_chat_pipeline(
         transcript, parsed_history
     )
+
+    if error == "llm_providers_failed":
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "llm_providers_failed",
+                "message": reply,
+            },
+        )
 
     audio_b64 = None
     if tts and not error:

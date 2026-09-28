@@ -1,5 +1,5 @@
 """
-NVIDIA NIM integration - Free AI models from NVIDIA
+NVIDIA NIM integration - Free AI models from NVIDIA.
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class NvidiaLLM:
-    """NVIDIA NIM client - Free AI models"""
+    """NVIDIA NIM client."""
 
     def __init__(self):
         self.settings = get_settings()
@@ -23,9 +23,9 @@ class NvidiaLLM:
         self.available = bool(self.api_key)
 
         if self.available:
-            logger.info(f"✅ NVIDIA NIM enabled (model: {self.model})")
+            logger.info("NVIDIA NIM enabled (model: %s)", self.model)
         else:
-            logger.warning("⚠️  No NVIDIA API key")
+            logger.warning("No NVIDIA API key")
 
     async def chat(
         self,
@@ -33,67 +33,47 @@ class NvidiaLLM:
         max_tokens: int = 2000,
         temperature: float = 0.7,
     ) -> dict:
-        """
-        Chat with NVIDIA NIM API
+        """Chat with NVIDIA NIM API.
 
-        Returns format compatible with Claude/Ollama:
-        {
-            "message": {
-                "role": "assistant",
-                "content": "response text"
-            }
-        }
+        Raises httpx.HTTPStatusError or httpx.TimeoutException on failure so the
+        caller can classify the error without coupling to this module.
         """
         if not self.available:
-            raise Exception("NVIDIA API key not configured")
+            raise RuntimeError("NVIDIA API key not configured")
 
         messages = inject_security_instruction(messages)
-        try:
-            # NVIDIA NIM uses specific model endpoints
-            # Full model list: https://build.nvidia.com/explore/discover
-            base_url = "https://integrate.api.nvidia.com/v1"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://integrate.api.nvidia.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "top_p": 1,
+                    "max_tokens": max_tokens,
+                    "stream": False,
+                },
+            )
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{base_url}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                        "Accept": "application/json",
-                    },
-                    json={
-                        "model": self.model,
-                        "messages": messages,
-                        "temperature": temperature,
-                        "top_p": 1,
-                        "max_tokens": max_tokens,
-                        "stream": False,
-                    },
-                )
+            response.raise_for_status()
+            data = response.json()
 
-                response.raise_for_status()
-                data = response.json()
-
-                # Convert to our standard format
-                return {
-                    "message": {
-                        "role": "assistant",
-                        "content": data["choices"][0]["message"]["content"],
-                    }
+            return {
+                "message": {
+                    "role": "assistant",
+                    "content": data["choices"][0]["message"]["content"],
                 }
-
-        except Exception as e:
-            logger.error(f"NVIDIA API error: {e}")
-            raise
+            }
 
 
-# Global instance
-_nvidia_llm: Optional[NvidiaLLM] = None
+# Initialized at module import so startup logs fire once during app startup.
+_nvidia_llm = NvidiaLLM()
 
 
 def get_nvidia_llm() -> NvidiaLLM:
-    """Get or create NVIDIA LLM instance"""
-    global _nvidia_llm
-    if _nvidia_llm is None:
-        _nvidia_llm = NvidiaLLM()
     return _nvidia_llm
