@@ -23,7 +23,7 @@ def start_scheduler():
         replace_existing=True,
     )
     scheduler.start()
-    logger.info("Scheduler started")
+    #logger.info("Scheduler started")
 
 
 def shutdown_scheduler():

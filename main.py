@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    setup_logging(settings.log_level, settings.debug)
+    setup_logging(settings.log_level, settings.debug, settings.log_sql)
     logger.info("Athena backend starting up")
 
     # One-line startup summary: environment, DB dialect, active LLM providers, integrations.
@@ -109,6 +109,9 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
 
 
 _settings = get_settings()
+# Configure logging before route imports so module-level ImportError handlers
+# (optional-dependency warnings) use the correct format and level from the start.
+setup_logging(_settings.log_level, _settings.debug, _settings.log_sql)
 
 # allow_credentials requires an explicit origin list (not "*") per the CORS spec.
 # This app does not use cookies, so credentials are disabled.

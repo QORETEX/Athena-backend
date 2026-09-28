@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     port: int = 8000
     log_level: str = "info"
     debug: bool = False
+    log_sql: bool = False
 
     # ── Database ─────────────────────────────────────────────────
     # Empty → SQLite default in development; required (non-SQLite) in production.

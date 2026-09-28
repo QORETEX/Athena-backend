@@ -444,7 +444,7 @@ async def init_db(database_url: str):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    logger.info("Database initialized")
+    #logger.info("Database initialized")
 
 
 async def get_db():
