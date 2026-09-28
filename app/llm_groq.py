@@ -9,6 +9,7 @@ from typing import Optional
 import httpx
 
 from app.config import get_settings
+from app.llm import inject_security_instruction
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ class GroqLLM:
         if not self.available:
             raise Exception("Groq API key not configured")
 
+        messages = inject_security_instruction(messages)
         max_retries = 2
         retry_delay = 1.0  # seconds
 

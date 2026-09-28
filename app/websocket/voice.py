@@ -265,7 +265,7 @@ async def process_utterance(
 
         from app.llm import build_system_prompt, chat_with_tools
         from app.memory.store import get_memory_store
-        from app.skills.base import get_ollama_tools, get_skill
+        from app.skills.base import get_ollama_tools, get_skill, serialize_tool_result
 
         memory_store = get_memory_store()
         memory_context = None
@@ -334,17 +334,7 @@ async def process_utterance(
                     {"tool": tool_name, "result": result},
                 )
 
-                tool_content = json.dumps(result)
-                # Client-executed skills return data from the user's device —
-                # treat it as untrusted to prevent prompt injection via crafted
-                # calendar events, contacts, etc.
-                if skill and skill.client_executed:
-                    tool_content = (
-                        f'<untrusted_content source="{tool_name}">'
-                        f"{tool_content}"
-                        f"</untrusted_content>"
-                    )
-                messages.append({"role": "tool", "content": tool_content})
+                messages.append({"role": "tool", "content": serialize_tool_result(skill, tool_name, result)})
 
             response = await chat_with_tools(messages, tools if tools else None)
             assistant_message = response.get("message", {})
@@ -454,15 +444,17 @@ async def voice_endpoint(ws: WebSocket):
         return
     _ws_connections_per_ip[client_ip] = current_conns + 1
 
-    await ws.accept()
-    logger.info("Voice WebSocket connected")
-
-    audio_buffer = bytearray()
-    session_history: list[dict] = []
+    # Initialize before try so finally can always reference them
     current_task: asyncio.Task | None = None
     client_tool_futures: dict[str, asyncio.Future] = {}
 
     try:
+        await ws.accept()
+        logger.info("Voice WebSocket connected")
+
+        audio_buffer = bytearray()
+        session_history: list[dict] = []
+
         while True:
             raw = await ws.receive()
 

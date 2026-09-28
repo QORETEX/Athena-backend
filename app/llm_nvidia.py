@@ -8,6 +8,7 @@ from typing import Optional
 import httpx
 
 from app.config import get_settings
+from app.llm import inject_security_instruction
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class NvidiaLLM:
         if not self.available:
             raise Exception("NVIDIA API key not configured")
 
+        messages = inject_security_instruction(messages)
         try:
             # NVIDIA NIM uses specific model endpoints
             # Full model list: https://build.nvidia.com/explore/discover

@@ -105,12 +105,33 @@ def build_system_prompt(
     return prompt
 
 
+def inject_security_instruction(messages: list[dict]) -> list[dict]:
+    """Return a copy of messages guaranteed to contain SECURITY_INSTRUCTION.
+
+    If the list already has a system message with the instruction, return it
+    unchanged (no allocation, no duplication).  If the system message exists
+    but lacks it, return a shallow copy with the instruction appended.  If
+    there is no system message at all, prepend one.
+    """
+    for i, msg in enumerate(messages):
+        if msg.get("role") == "system":
+            content = msg.get("content", "")
+            if SECURITY_INSTRUCTION in content:
+                return messages
+            new = list(messages)
+            new[i] = {**msg, "content": content + ("\n" if content else "") + SECURITY_INSTRUCTION}
+            return new
+    return [{"role": "system", "content": SECURITY_INSTRUCTION}, *messages]
+
+
 async def chat_with_tools(
     messages: list[dict],
     tools: list[dict] | None = None,
 ) -> dict:
     settings = get_settings()
     url = f"{settings.ollama_base_url}/api/chat"
+
+    messages = inject_security_instruction(messages)
 
     payload: dict = {
         "model": settings.ollama_model,

@@ -388,12 +388,34 @@ The production build uses `requirements-production.txt` which excludes local-onl
 - [ ] Database queries work
 - [ ] Check logs for errors
 - [ ] Test from mobile app
+- [ ] **Verify real-IP detection** (one-time, see below)
 
 ### Ongoing
 - [ ] Monitor logs daily
 - [ ] Check error rates
 - [ ] Monitor API usage (Groq dashboard)
 - [ ] Database storage usage (Neon dashboard)
+
+---
+
+## Verifying Real-IP Detection (one-time)
+
+The `get_client_ip()` function reads the **rightmost** `X-Forwarded-For` entry when
+`TRUST_PROXY=true` (Render appends the real client IP there). To confirm this is
+correct for your Render account / region:
+
+1. Set `DEBUG_CLIENT_IP=true` in Render environment variables and redeploy.
+2. From **two different networks** (home WiFi + mobile data, two offices, etc.) hit:
+   ```
+   curl https://your-app.onrender.com/api/_debug/client-ip
+   ```
+3. Confirm that `get_client_ip` matches your real public IP each time.
+4. If `get_client_ip` is wrong but the real IP appears in `cf_connecting_ip` or
+   `true_client_ip`, change `get_client_ip()` in `app/rate_limit.py` and
+   `_get_ws_client_ip()` in `app/websocket/voice.py` to prefer that header.
+5. The route also exposes `ws_connections_per_ip` — open and close 3 WebSocket
+   connections, then hit the route to confirm the counter goes back to zero.
+6. Set `DEBUG_CLIENT_IP=false` and redeploy. The route returns 404 when false.
 
 ---
 

@@ -24,5 +24,6 @@ register_skill(
         },
         handler=None,
         client_executed=True,
+        returns_external_content=True,
     )
 )

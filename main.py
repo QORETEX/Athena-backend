@@ -176,6 +176,10 @@ app.include_router(notifications_router)
 app.include_router(voice_router)
 app.include_router(events_router)
 
+if _settings.debug_client_ip:
+    from app.routes.debug import router as debug_router
+    app.include_router(debug_router)
+
 if __name__ == "__main__":
     import uvicorn
 

@@ -13,7 +13,7 @@ from app.llm import build_system_prompt, chat_with_tools
 from app.llm_claude import get_claude_llm
 from app.memory.store import get_memory_store
 from app.rate_limit import limiter
-from app.skills.base import get_ollama_tools, get_skill
+from app.skills.base import get_ollama_tools, get_skill, serialize_tool_result
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,7 @@ async def _run_chat_pipeline(
                 result = {"error": f"Skill '{tool_name}' has no handler"}
 
             all_tool_results.append({"tool": tool_name, "result": result})
-            messages.append({"role": "tool", "content": json.dumps(result)})
+            messages.append({"role": "tool", "content": serialize_tool_result(skill, tool_name, result)})
 
         response = await claude.chat(messages, tools if tools else None)
         assistant_message = response.get("message", {})

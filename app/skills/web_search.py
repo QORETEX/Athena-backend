@@ -34,12 +34,7 @@ async def handle_web_search(query: str) -> dict:
             {
                 "title": r.get("title", ""),
                 "url": r.get("url", ""),
-                # Wrap snippet in tags so the LLM knows this is untrusted external content
-                "snippet": (
-                    "<untrusted_content source=\"web_search\">"
-                    + r.get("content", "")
-                    + "</untrusted_content>"
-                ),
+                "snippet": r.get("content", ""),
             }
             for r in raw_results
         ],
@@ -64,5 +59,6 @@ register_skill(
         },
         handler=handle_web_search,
         timeout=20,
+        returns_external_content=True,
     )
 )

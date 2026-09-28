@@ -108,6 +108,10 @@ class Settings(BaseSettings):
     # Max concurrent /ws/voice connections per client IP
     ws_max_conn_per_ip: int = 3
 
+    # Expose GET /api/_debug/client-ip when true. Deploy with true, verify IP
+    # detection is correct from two networks, then set false again.
+    debug_client_ip: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:
