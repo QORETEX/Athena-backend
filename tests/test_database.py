@@ -83,11 +83,10 @@ async def test_conversation_log(test_db: AsyncSession):
 async def test_user_creation(test_db: AsyncSession):
     """Test creating a user."""
     user = User(
-        provider="google",
-        provider_id="google_12345",
         email="test@example.com",
         name="Test User",
-        avatar_url="https://example.com/avatar.jpg"
+        avatar_url="https://example.com/avatar.jpg",
+        is_active=True,
     )
 
     test_db.add(user)
@@ -96,6 +95,7 @@ async def test_user_creation(test_db: AsyncSession):
 
     assert user.id is not None
     assert user.email == "test@example.com"
+    assert user.is_active is True
 
 
 @pytest.mark.asyncio

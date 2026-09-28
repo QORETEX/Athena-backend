@@ -24,7 +24,7 @@ class ReminderUpdate(BaseModel):
     completed: bool | None = None
 
 
-@router.get("/", response_model=list[ReminderResponse])
+@router.get("", response_model=list[ReminderResponse])
 async def list_reminders(
     completed: bool | None = None,
     db: AsyncSession = Depends(get_db),
@@ -46,7 +46,7 @@ async def list_reminders(
     ]
 
 
-@router.post("/", response_model=ReminderResponse, status_code=201)
+@router.post("", response_model=ReminderResponse, status_code=201)
 async def create_reminder(body: ReminderCreate, db: AsyncSession = Depends(get_db)):
     reminder = Reminder(text=body.text, remind_at=body.remind_at)
     db.add(reminder)

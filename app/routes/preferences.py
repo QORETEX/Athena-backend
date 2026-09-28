@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,11 +37,10 @@ class PreferenceUpdate(BaseModel):
 
 
 class PreferenceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     key: str
     value: str
-
-    class Config:
-        from_attributes = True
 
 
 # ── Routes ────────────────────────────────────────────────

@@ -469,6 +469,43 @@ async def voice_endpoint(ws: WebSocket):
 
     try:
         await ws.accept()
+
+        # Auth: first message must be {"type":"auth","token":"<access_token>"} within 5 s.
+        try:
+            _raw_auth = await asyncio.wait_for(ws.receive(), timeout=5.0)
+        except asyncio.TimeoutError:
+            await ws.close(code=1008)
+            return
+
+        _auth_text = _raw_auth.get("text", "")
+        if not _auth_text:
+            await ws.close(code=1008)
+            return
+
+        try:
+            _auth_msg = json.loads(_auth_text)
+        except json.JSONDecodeError:
+            await ws.close(code=1008)
+            return
+
+        if _auth_msg.get("type") != "auth" or not _auth_msg.get("token"):
+            await ws.close(code=1008)
+            return
+
+        try:
+            from app.auth.tokens import decode_access_token
+            from app.db import User as _User, async_session as _async_session
+            _payload = decode_access_token(_auth_msg["token"])
+            _user_id = int(_payload["sub"])
+            async with _async_session() as _session:
+                _user = await _session.get(_User, _user_id)
+                if _user is None or not _user.is_active:
+                    await ws.close(code=1008)
+                    return
+        except Exception:
+            await ws.close(code=1008)
+            return
+
         logger.info("Voice WebSocket connected")
 
         audio_buffer = bytearray()

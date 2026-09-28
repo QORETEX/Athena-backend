@@ -1,12 +1,16 @@
 """Pytest configuration and fixtures for Athena backend tests."""
-import asyncio
 import os
-from typing import AsyncGenerator, Generator
+from typing import AsyncGenerator
 
-# MUST be set before any app import so get_settings() sees them on first call.
-os.environ.setdefault("ENVIRONMENT", "development")
+# Set test environment BEFORE any app imports so Settings() picks them up.
+# Hard-set (not setdefault) so no shell variable can override these.
+os.environ["ENVIRONMENT"] = "development"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["JWT_SECRET"] = "test-secret-key-for-testing-only-padded-abcdef"
+os.environ["PASSWORD_AUTH_ENABLED"] = "true"
+os.environ["RATE_LIMIT_AUTH"] = "10000/minute"
+os.environ["RATE_LIMIT_LLM"] = "10000/minute"
+os.environ["RATE_LIMIT_IMAGE"] = "10000/minute"
 
 import pytest
 import pytest_asyncio
@@ -14,24 +18,37 @@ from fastapi.testclient import TestClient
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 
-# Clear the lru_cache so the imported Settings instance reflects the env vars
-# we just set, rather than any stale singleton from a previous import.
+# Clear any stale lru_cache entry from a prior import.
 get_settings.cache_clear()
 
+# Build test settings that never read .env — result is deterministic in any
+# shell environment, including `env -i PATH=... HOME=... pytest ...`.
+_test_settings = Settings(
+    _env_file=None,
+    environment="development",
+    database_url="sqlite+aiosqlite:///:memory:",
+    jwt_secret="test-secret-key-for-testing-only-padded-abcdef",
+    password_auth_enabled=True,
+    rate_limit_auth="10000/minute",
+    rate_limit_llm="10000/minute",
+    rate_limit_image="10000/minute",
+)
+
+# Replace the module-level get_settings so every app module imported after
+# this point gets our test settings when it does `from app.config import get_settings`.
+import app.config as _config
+_config.get_settings = lambda: _test_settings  # type: ignore[assignment]
+
 from app.db import Base, get_db
+from app.rate_limit import limiter
 from main import app
 
+# Disable SlowAPI rate limiting in tests.
+limiter._enabled = False
+
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
-
-
-@pytest.fixture(scope="session")
-def event_loop() -> Generator:
-    """Create an instance of the default event loop for the test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -70,6 +87,20 @@ def override_get_db(test_db: AsyncSession):
 def client(override_get_db) -> TestClient:
     """Create a test client with database override."""
     return TestClient(app)
+
+
+@pytest.fixture
+def authenticated_client(override_get_db) -> TestClient:
+    """TestClient pre-authenticated with a test user via /api/auth/register."""
+    tc = TestClient(app)
+    resp = tc.post("/api/auth/register", json={
+        "email": "testuser@example.com",
+        "password": "testpassword123",
+        "name": "Test User",
+    })
+    assert resp.status_code == 200, f"Register failed: {resp.status_code} {resp.text}"
+    token = resp.json()["access_token"]
+    return TestClient(app, headers={"Authorization": f"Bearer {token}"})
 
 
 @pytest_asyncio.fixture

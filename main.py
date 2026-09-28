@@ -1,17 +1,28 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 
+from app.auth.dependencies import get_current_user
 from app.config import get_settings
 from app.db import init_db
 from app.logging_config import setup_logging
 from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
+
+# Paths that do not require authentication.
+PUBLIC_ROUTES: frozenset[str] = frozenset({
+    "/health",
+    "/api/auth/google",
+    "/api/auth/apple",
+    "/api/auth/refresh",
+    "/api/auth/register",
+    "/api/auth/login",
+})
 
 
 @asynccontextmanager
@@ -20,8 +31,6 @@ async def lifespan(app: FastAPI):
     setup_logging(settings.log_level, settings.debug, settings.log_sql)
     logger.info("Athena backend starting up")
 
-    # One-line startup summary: environment, DB dialect, active LLM providers, integrations.
-    # Never log keys or credential-bearing URLs.
     _db_dialect = settings.database_url.split("+")[0].split(":")[0] if settings.database_url else "none"
     _providers = [n for n, v in [
         ("claude", settings.anthropic_api_key),
@@ -47,30 +56,24 @@ async def lifespan(app: FastAPI):
 
     start_scheduler()
 
-    # Trigger skill registration
     import app.skills.registry  # noqa: F401
 
-    # Load saved routines into scheduler
     from app.routines.engine import load_routines
 
     await load_routines()
 
-    # Start background task worker
     from app.tasks.runner import start_task_worker, stop_task_worker
 
     await start_task_worker()
 
-    # Start proactive monitoring loop
     from app.proactive.monitor import start_monitor, stop_monitor
 
     await start_monitor()
 
-    # Start JARVIS autonomous brain (Claude-powered)
     from app.autonomous.jarvis_brain import start_jarvis_brain, stop_jarvis_brain
 
     await start_jarvis_brain()
 
-    # Initialize preset quick actions
     try:
         from app.db import async_session
         from app.services.quick_actions_service import QuickActionsService
@@ -92,14 +95,23 @@ async def lifespan(app: FastAPI):
     logger.info("Athena backend shut down")
 
 
+_settings = get_settings()
+setup_logging(_settings.log_level, _settings.debug, _settings.log_sql)
+
+_is_dev = _settings.environment != "production"
+
 app = FastAPI(
     title="Athena Voice Assistant",
     description="Local-first AI assistant backend — proactive, ambient, context-aware",
     version="2.0.0",
     lifespan=lifespan,
+    redirect_slashes=False,
+    # Disable interactive docs in production.
+    docs_url="/docs" if _is_dev else None,
+    redoc_url="/redoc" if _is_dev else None,
+    openapi_url="/openapi.json" if _is_dev else None,
 )
 
-# Attach the rate limiter and its 429 error handler
 app.state.limiter = limiter
 
 
@@ -108,13 +120,6 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
     return JSONResponse(status_code=429, content={"detail": str(exc)})
 
 
-_settings = get_settings()
-# Configure logging before route imports so module-level ImportError handlers
-# (optional-dependency warnings) use the correct format and level from the start.
-setup_logging(_settings.log_level, _settings.debug, _settings.log_sql)
-
-# allow_credentials requires an explicit origin list (not "*") per the CORS spec.
-# This app does not use cookies, so credentials are disabled.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_settings.cors_origin_list,
@@ -123,9 +128,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Routes ────────────────────────────────────────────────
+# ── Route imports ────────────────────────────────────────────────
 
-from app.routes.auth import router as auth_router
+from app.auth.password import router as password_router
+from app.routes.auth import protected_router as auth_protected_router
+from app.routes.auth import public_router as auth_public_router
 from app.routes.automation import router as automation_router
 from app.routes.briefing import router as briefing_router
 from app.routes.briefing_enhanced import router as briefing_enhanced_router
@@ -162,46 +169,57 @@ from app.routes.wellness import router as wellness_router
 from app.websocket.events import router as events_router
 from app.websocket.voice import router as voice_router
 
+# ── Public routes (no authentication required) ───────────────────
+
 app.include_router(health_router)
-app.include_router(auth_router)
-app.include_router(skills_router)
-app.include_router(chat_router)
-app.include_router(context_router)
-app.include_router(push_router)
-app.include_router(briefing_enhanced_router)
-app.include_router(memory_enhanced_router)
-app.include_router(patterns_router)
-app.include_router(emails_router)
-app.include_router(calendar_router)
-app.include_router(journal_router)
-app.include_router(commute_router)
-app.include_router(wellness_router)
-app.include_router(automation_router)
-app.include_router(relationships_router)
-app.include_router(focus_router)
-app.include_router(shortcuts_router)
-app.include_router(learning_router)
-app.include_router(image_router)
-app.include_router(reminders_router)
-app.include_router(notes_router)
-app.include_router(weather_router)
-app.include_router(search_router)
-app.include_router(knowledge_router)
-app.include_router(memory_router)
-app.include_router(smart_home_router)
-app.include_router(vision_router)
-app.include_router(conversations_router)
-app.include_router(briefing_router)
-app.include_router(routines_router)
-app.include_router(tasks_router)
-app.include_router(preferences_router)
-app.include_router(notifications_router)
+app.include_router(auth_public_router)
+app.include_router(password_router)
+
+# ── Protected routes (every route requires get_current_user) ─────
+
+_auth = [Depends(get_current_user)]
+
+app.include_router(auth_protected_router, dependencies=_auth)
+app.include_router(skills_router, dependencies=_auth)
+app.include_router(chat_router, dependencies=_auth)
+app.include_router(context_router, dependencies=_auth)
+app.include_router(push_router, dependencies=_auth)
+app.include_router(briefing_enhanced_router, dependencies=_auth)
+app.include_router(memory_enhanced_router, dependencies=_auth)
+app.include_router(patterns_router, dependencies=_auth)
+app.include_router(emails_router, dependencies=_auth)
+app.include_router(calendar_router, dependencies=_auth)
+app.include_router(journal_router, dependencies=_auth)
+app.include_router(commute_router, dependencies=_auth)
+app.include_router(wellness_router, dependencies=_auth)
+app.include_router(automation_router, dependencies=_auth)
+app.include_router(relationships_router, dependencies=_auth)
+app.include_router(focus_router, dependencies=_auth)
+app.include_router(shortcuts_router, dependencies=_auth)
+app.include_router(learning_router, dependencies=_auth)
+app.include_router(image_router, dependencies=_auth)
+app.include_router(reminders_router, dependencies=_auth)
+app.include_router(notes_router, dependencies=_auth)
+app.include_router(weather_router, dependencies=_auth)
+app.include_router(search_router, dependencies=_auth)
+app.include_router(knowledge_router, dependencies=_auth)
+app.include_router(memory_router, dependencies=_auth)
+app.include_router(smart_home_router, dependencies=_auth)
+app.include_router(vision_router, dependencies=_auth)
+app.include_router(conversations_router, dependencies=_auth)
+app.include_router(briefing_router, dependencies=_auth)
+app.include_router(routines_router, dependencies=_auth)
+app.include_router(tasks_router, dependencies=_auth)
+app.include_router(preferences_router, dependencies=_auth)
+app.include_router(notifications_router, dependencies=_auth)
+
+# WebSocket routes: auth is enforced inside the handler (first message).
 app.include_router(voice_router)
 app.include_router(events_router)
 
 if _settings.debug_client_ip:
     from app.routes.debug import router as debug_router
-    app.include_router(debug_router)
+    app.include_router(debug_router, dependencies=_auth)
 
 if __name__ == "__main__":
     import uvicorn

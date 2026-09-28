@@ -44,7 +44,8 @@ class NvidiaLLM:
         messages = inject_security_instruction(messages)
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                "https://integrate.api.nvidia.com/v1/chat/completions",
+                "https://integrate.api.nvidia.com/v1",
+                #"https://integrate.api.nvidia.com/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",

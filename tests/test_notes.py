@@ -39,9 +39,9 @@ def multiple_notes_data():
     ]
 
 
-def test_create_note(client: TestClient, sample_note_data):
+def test_create_note(authenticated_client: TestClient, sample_note_data):
     """Test creating a new note."""
-    response = client.post(f"{BASE}/", json=sample_note_data)
+    response = authenticated_client.post(f"{BASE}", json=sample_note_data)
 
     assert response.status_code == 201
     data = response.json()
@@ -51,42 +51,42 @@ def test_create_note(client: TestClient, sample_note_data):
     assert "created_at" in data
 
 
-def test_create_note_without_tags(client: TestClient):
+def test_create_note_without_tags(authenticated_client: TestClient):
     """Test creating a note without tags."""
     note_data = {"content": "Simple note without tags"}
 
-    response = client.post(f"{BASE}/", json=note_data)
+    response = authenticated_client.post(f"{BASE}", json=note_data)
     assert response.status_code == 201
     data = response.json()
     assert data["tags"] == []
 
 
-def test_list_notes(client: TestClient, multiple_notes_data):
+def test_list_notes(authenticated_client: TestClient, multiple_notes_data):
     """Test listing all notes."""
     for note_data in multiple_notes_data:
-        client.post(f"{BASE}/", json=note_data)
+        authenticated_client.post(f"{BASE}", json=note_data)
 
-    response = client.get(f"{BASE}/")
+    response = authenticated_client.get(f"{BASE}")
     assert response.status_code == 200
     data = response.json()
 
     assert len(data) >= len(multiple_notes_data)
 
 
-def test_create_and_find_note_by_content(client: TestClient, sample_note_data):
+def test_create_and_find_note_by_content(authenticated_client: TestClient, sample_note_data):
     """Test that a created note appears in the list."""
-    client.post(f"{BASE}/", json=sample_note_data)
+    authenticated_client.post(f"{BASE}", json=sample_note_data)
 
-    response = client.get(f"{BASE}/")
+    response = authenticated_client.get(f"{BASE}")
     assert response.status_code == 200
     data = response.json()
     contents = [n["content"] for n in data]
     assert sample_note_data["content"] in contents
 
 
-def test_update_note(client: TestClient, sample_note_data):
+def test_update_note(authenticated_client: TestClient, sample_note_data):
     """Test updating a note's content and tags."""
-    create_response = client.post(f"{BASE}/", json=sample_note_data)
+    create_response = authenticated_client.post(f"{BASE}", json=sample_note_data)
     note_id = create_response.json()["id"]
 
     update_data = {
@@ -94,7 +94,7 @@ def test_update_note(client: TestClient, sample_note_data):
         "tags": ["work", "done"]
     }
 
-    response = client.patch(f"{BASE}/{note_id}", json=update_data)
+    response = authenticated_client.patch(f"{BASE}/{note_id}", json=update_data)
     assert response.status_code == 200
     data = response.json()
     assert data["content"] == update_data["content"]
@@ -102,21 +102,21 @@ def test_update_note(client: TestClient, sample_note_data):
     assert "updated_at" in data
 
 
-def test_delete_note(client: TestClient, sample_note_data):
+def test_delete_note(authenticated_client: TestClient, sample_note_data):
     """Test deleting a note."""
-    create_response = client.post(f"{BASE}/", json=sample_note_data)
+    create_response = authenticated_client.post(f"{BASE}", json=sample_note_data)
     note_id = create_response.json()["id"]
 
-    delete_response = client.delete(f"{BASE}/{note_id}")
+    delete_response = authenticated_client.delete(f"{BASE}/{note_id}")
     assert delete_response.status_code == 204
 
 
-def test_search_notes(client: TestClient, multiple_notes_data):
+def test_search_notes(authenticated_client: TestClient, multiple_notes_data):
     """Test searching notes by content."""
     for note_data in multiple_notes_data:
-        client.post(f"{BASE}/", json=note_data)
+        authenticated_client.post(f"{BASE}", json=note_data)
 
-    response = client.get(f"{BASE}/?search=meeting")
+    response = authenticated_client.get(f"{BASE}?search=meeting")
     assert response.status_code == 200
     data = response.json()
 

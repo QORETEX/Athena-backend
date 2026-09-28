@@ -38,7 +38,7 @@ def _to_response(note: Note) -> NoteResponse:
     )
 
 
-@router.get("/", response_model=list[NoteResponse])
+@router.get("", response_model=list[NoteResponse])
 async def list_notes(
     search: str | None = None,
     db: AsyncSession = Depends(get_db),
@@ -50,7 +50,7 @@ async def list_notes(
     return [_to_response(n) for n in result.scalars().all()]
 
 
-@router.post("/", response_model=NoteResponse, status_code=201)
+@router.post("", response_model=NoteResponse, status_code=201)
 async def create_note(body: NoteCreate, db: AsyncSession = Depends(get_db)):
     note = Note(content=body.content, tags=json.dumps(body.tags))
     db.add(note)

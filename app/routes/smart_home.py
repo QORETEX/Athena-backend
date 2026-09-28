@@ -5,7 +5,7 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,6 +54,8 @@ class DeviceUpdate(BaseModel):
 
 
 class DeviceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     entity_id: str
     name: str
@@ -61,9 +63,6 @@ class DeviceResponse(BaseModel):
     room: Optional[str] = None
     icon: Optional[str] = None
     is_favorite: bool = False
-
-    class Config:
-        from_attributes = True
 
 
 # ── Control ────────────────────────────────────────────────

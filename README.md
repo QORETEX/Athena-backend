@@ -76,8 +76,8 @@ cp .env.example .env
 # - DATABASE_URL (get free from neon.tech)
 # - GROQ_API_KEY (get free from console.groq.com)
 
-# Run server
-uvicorn main:app --reload
+# Apply migrations and start server
+alembic upgrade head && uvicorn main:app --reload
 ```
 
 Server runs at: **http://localhost:8000**

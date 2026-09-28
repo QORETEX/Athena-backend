@@ -7,7 +7,7 @@ from app.config import Settings, get_settings
 # All field names that pydantic-settings reads from the environment.
 # Cleared in clean_env so shell variables don't bleed into tests.
 _ALL_SETTINGS_KEYS = [
-    "ENVIRONMENT", "HOST", "PORT", "LOG_LEVEL", "DEBUG",
+    "ENVIRONMENT", "HOST", "PORT", "LOG_LEVEL", "DEBUG", "LOG_SQL",
     "DATABASE_URL",
     "OLLAMA_BASE_URL", "OLLAMA_MODEL", "OLLAMA_TIMEOUT",
     "PIPER_MODEL_PATH", "PIPER_SAMPLE_RATE",
@@ -19,8 +19,10 @@ _ALL_SETTINGS_KEYS = [
     "WEATHER_API_URL", "DEFAULT_LATITUDE", "DEFAULT_LONGITUDE",
     "IMAGE_GEN_ENABLED", "STABLE_DIFFUSION_MODEL",
     "GEMINI_API_KEY", "GEMINI_IMAGE_MODEL",
-    "JWT_SECRET", "JWT_EXPIRY_DAYS",
+    "JWT_SECRET",
+    "ACCESS_TOKEN_TTL_MINUTES", "REFRESH_TOKEN_TTL_DAYS",
     "GOOGLE_CLIENT_ID", "APPLE_CLIENT_ID",
+    "PASSWORD_AUTH_ENABLED", "RATE_LIMIT_AUTH",
     "KNOWLEDGE_COLLECTION", "KNOWLEDGE_CHUNK_SIZE", "KNOWLEDGE_CHUNK_OVERLAP",
     "ANTHROPIC_API_KEY", "CLAUDE_MODEL",
     "GROQ_API_KEY", "GROQ_MODEL",
@@ -40,6 +42,7 @@ _VALID_PROD = dict(
     cors_origins="https://app.example.com",
     groq_api_key="gsk_test_key_valid",
     groq_model="openai/gpt-oss-20b",
+    google_client_id="test.apps.googleusercontent.com",
     debug=False,
 )
 

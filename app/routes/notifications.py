@@ -5,7 +5,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +20,8 @@ router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
 
 class NotificationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     event_type: str
     priority: str
@@ -28,9 +30,6 @@ class NotificationResponse(BaseModel):
     data: Optional[dict] = None
     read: bool = False
     created_at: str
-
-    class Config:
-        from_attributes = True
 
 
 # ── Routes ────────────────────────────────────────────────

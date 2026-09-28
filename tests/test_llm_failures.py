@@ -140,14 +140,14 @@ async def test_skipped_providers_not_in_failure_message():
 # ── HTTP route tests ──────────────────────────────────────────────────────────
 
 
-def test_no_llm_configured_returns_503(client):
+def test_no_llm_configured_returns_503(authenticated_client):
     """No LLM provider configured → HTTP 503 with error=no_llm_available."""
     fake_settings = MagicMock()
     fake_settings.any_llm_configured = False
     fake_settings.rate_limit_llm = "1000/minute"
 
     with patch("app.routes.chat.get_settings", return_value=fake_settings):
-        resp = client.post(
+        resp = authenticated_client.post(
             "/api/chat/text",
             json={"message": "hi", "history": [], "tts": False},
         )
@@ -159,7 +159,7 @@ def test_no_llm_configured_returns_503(client):
     assert "configured" in detail.get("message", "").lower()
 
 
-def test_providers_fail_returns_502(client):
+def test_providers_fail_returns_502(authenticated_client):
     """Providers configured but all fail → HTTP 502 with error=llm_providers_failed."""
     failure_response = {
         "message": {
@@ -180,7 +180,7 @@ def test_providers_fail_returns_502(client):
         patch("app.routes.chat.get_settings", return_value=fake_settings),
         patch("app.routes.chat.get_claude_llm", return_value=mock_llm),
     ):
-        resp = client.post(
+        resp = authenticated_client.post(
             "/api/chat/text",
             json={"message": "hi", "history": [], "tts": False},
         )

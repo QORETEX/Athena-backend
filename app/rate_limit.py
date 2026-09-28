@@ -1,4 +1,4 @@
-"""Shared SlowAPI limiter instance for LLM / external-API routes."""
+"""Shared SlowAPI limiter instance for all routes."""
 from slowapi import Limiter
 from starlette.requests import Request
 
@@ -6,17 +6,7 @@ from app.config import get_settings
 
 
 def get_client_ip(request: Request) -> str:
-    """Return the client IP used as the rate-limit key.
-
-    When TRUST_PROXY=true (Render / behind a trusted reverse proxy), Render
-    appends the real client IP as the RIGHTMOST X-Forwarded-For entry.  We
-    use that so a client cannot bypass the limit by spoofing the leftmost
-    entry.
-
-    When TRUST_PROXY=false (local dev / direct connections) we ignore
-    X-Forwarded-For entirely and use the transport-layer host, which is not
-    client-controlled.
-    """
+    """Return the transport-layer client IP (no XFF considered)."""
     settings = get_settings()
     if settings.trust_proxy:
         xff = request.headers.get("x-forwarded-for", "")
@@ -25,4 +15,21 @@ def get_client_ip(request: Request) -> str:
     return (request.client.host if request.client else None) or "127.0.0.1"
 
 
-limiter = Limiter(key_func=get_client_ip)
+def get_rate_limit_key(request: Request) -> str:
+    """Rate-limit key: user ID for authenticated requests, IP address otherwise.
+
+    Decodes the Bearer token without a DB hit so authenticated users are not
+    limited by shared IP (e.g. behind a NAT or VPN).
+    """
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        try:
+            from app.auth.tokens import decode_access_token
+            payload = decode_access_token(auth[7:])
+            return f"user:{payload['sub']}"
+        except Exception:
+            pass
+    return get_client_ip(request)
+
+
+limiter = Limiter(key_func=get_rate_limit_key)
