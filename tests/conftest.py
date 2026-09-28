@@ -1,9 +1,12 @@
-"""
-Pytest configuration and fixtures for Athena backend tests
-"""
+"""Pytest configuration and fixtures for Athena backend tests."""
 import asyncio
 import os
 from typing import AsyncGenerator, Generator
+
+# MUST be set before any app import so get_settings() sees them on first call.
+os.environ.setdefault("ENVIRONMENT", "development")
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+os.environ["JWT_SECRET"] = "test-secret-key-for-testing-only-padded-abcdef"
 
 import pytest
 import pytest_asyncio
@@ -11,11 +14,15 @@ from fastapi.testclient import TestClient
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
+from app.config import get_settings
+
+# Clear the lru_cache so the imported Settings instance reflects the env vars
+# we just set, rather than any stale singleton from a previous import.
+get_settings.cache_clear()
+
 from app.db import Base, get_db
 from main import app
 
-
-# Test database URL
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 
@@ -98,10 +105,3 @@ def mock_jwt_token():
 def sample_audio_data():
     """Sample audio data for testing (base64 encoded WAV header)."""
     return "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="
-
-
-# Set test environment variables
-os.environ["TESTING"] = "true"
-os.environ["DATABASE_URL"] = TEST_DATABASE_URL
-os.environ["OLLAMA_BASE_URL"] = "http://localhost:11434"
-os.environ["JWT_SECRET"] = "test-secret-key-for-testing-only"

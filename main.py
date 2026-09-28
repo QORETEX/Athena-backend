@@ -20,6 +20,27 @@ async def lifespan(app: FastAPI):
     setup_logging(settings.log_level, settings.debug)
     logger.info("Athena backend starting up")
 
+    # One-line startup summary: environment, DB dialect, active LLM providers, integrations.
+    # Never log keys or credential-bearing URLs.
+    _db_dialect = settings.database_url.split("+")[0].split(":")[0] if settings.database_url else "none"
+    _providers = [n for n, v in [
+        ("claude", settings.anthropic_api_key),
+        ("groq", settings.groq_api_key),
+        ("nvidia", settings.nvidia_api_key),
+    ] if v] + (["ollama"] if settings.ollama_enabled else [])
+    _integrations = [n for n, ok in [
+        ("smart_home", settings.smart_home_enabled),
+        ("web_search", settings.web_search_enabled),
+        ("image_gen", settings.image_gen_enabled),
+    ] if ok]
+    logger.info(
+        "Config: env=%s db=%s llm=[%s] integrations=[%s]",
+        settings.environment,
+        _db_dialect,
+        ",".join(_providers) or "none",
+        ",".join(_integrations) or "none",
+    )
+
     await init_db(settings.database_url)
 
     from app.scheduler import start_scheduler, shutdown_scheduler
@@ -88,13 +109,12 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
 
 
 _settings = get_settings()
-_cors_origins = [o.strip() for o in _settings.cors_origins.split(",") if o.strip()]
 
 # allow_credentials requires an explicit origin list (not "*") per the CORS spec.
 # This app does not use cookies, so credentials are disabled.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins,
+    allow_origins=_settings.cors_origin_list,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

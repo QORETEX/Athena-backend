@@ -10,8 +10,6 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_AVAILABLE = True
-
 # Shared constant — imported by llm_claude.py and jarvis_brain.py so the
 # instruction is never copy-pasted and stays consistent across all providers.
 SECURITY_INSTRUCTION = (
@@ -129,6 +127,17 @@ async def chat_with_tools(
     tools: list[dict] | None = None,
 ) -> dict:
     settings = get_settings()
+
+    # Skip entirely when Ollama is not configured — avoids a 120 s connection timeout.
+    if not settings.ollama_enabled:
+        return {
+            "message": {
+                "role": "assistant",
+                "content": "No language model is available. Please configure an LLM provider.",
+            },
+            "error": "ollama_disabled",
+        }
+
     url = f"{settings.ollama_base_url}/api/chat"
 
     messages = inject_security_instruction(messages)

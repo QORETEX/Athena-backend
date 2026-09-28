@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 
 async def handle_smart_home(entity_id: str, action: str) -> dict:
     settings = get_settings()
-    if not settings.hass_token:
-        return {"success": False, "error": "Home Assistant not configured — set HASS_TOKEN in .env"}
+    if not settings.smart_home_enabled:
+        return {"success": False, "error": "Smart home is not configured — set HASS_URL and HASS_TOKEN in .env"}
 
     domain = entity_id.split(".")[0]
     url = f"{settings.hass_url}/api/services/{domain}/{action}"
@@ -57,5 +57,7 @@ register_skill(
         },
         handler=handle_smart_home,
         timeout=15,
+        # Offered to the LLM only when HASS_URL and HASS_TOKEN are both set.
+        enabled_check=lambda: get_settings().smart_home_enabled,
     )
 )

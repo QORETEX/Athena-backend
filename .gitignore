@@ -31,6 +31,7 @@ ENV/
 .env.*.local
 .env.*
 !.env.example
+!.env.production.example
 .env.production
 
 # OAuth token files (contain live refresh tokens — never commit)

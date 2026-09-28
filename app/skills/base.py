@@ -15,6 +15,12 @@ class Skill:
     # LLM should not treat as instructions (web snippets, calendar event titles,
     # user-uploaded documents, client-device data, etc.)
     returns_external_content: bool = False
+    # When set, called at tool-list build time to decide whether to offer this
+    # skill to the LLM.  None means always offer.  Examples:
+    #   web_search   → lambda: get_settings().web_search_enabled
+    #   smart_home   → lambda: get_settings().smart_home_enabled
+    #   image_gen    → lambda: get_settings().image_gen_enabled
+    enabled_check: Optional[Callable[[], bool]] = None
 
 
 _registry: dict[str, Skill] = {}
@@ -44,6 +50,7 @@ def serialize_tool_result(skill: Optional[Skill], tool_name: str, result: object
 
 
 def get_ollama_tools() -> list[dict]:
+    """Return tool descriptors for all currently-enabled skills."""
     return [
         {
             "type": "function",
@@ -54,4 +61,5 @@ def get_ollama_tools() -> list[dict]:
             },
         }
         for s in _registry.values()
+        if s.enabled_check is None or s.enabled_check()
     ]

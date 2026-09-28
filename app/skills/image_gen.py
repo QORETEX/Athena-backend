@@ -164,5 +164,7 @@ register_skill(
         },
         handler=handle_image_gen,
         timeout=120,
+        # Offered to the LLM only when IMAGE_GEN_ENABLED=true.
+        enabled_check=lambda: get_settings().image_gen_enabled,
     )
 )

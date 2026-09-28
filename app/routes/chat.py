@@ -5,7 +5,7 @@ import base64
 import json
 import logging
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from app.config import get_settings
@@ -154,6 +154,15 @@ async def _get_tts_audio(text: str) -> str | None:
 @limiter.limit(get_settings().rate_limit_llm)
 async def text_chat(request: Request, body: TextChatRequest):
     """Text chat with Athena. Set tts=true to also get the reply as audio."""
+    if not get_settings().any_llm_configured:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "No LLM provider is configured. "
+                "Set at least one of: ANTHROPIC_API_KEY, GROQ_API_KEY, "
+                "NVIDIA_API_KEY, or OLLAMA_BASE_URL."
+            ),
+        )
 
     reply, tool_calls, tool_results, error = await _run_chat_pipeline(
         body.message, body.history
@@ -181,6 +190,15 @@ async def audio_chat(
     tts: bool = Form(default=True, description="Return reply as audio"),
 ):
     """Send audio, get a transcription + LLM reply (optionally with TTS audio back)."""
+    if not get_settings().any_llm_configured:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "No LLM provider is configured. "
+                "Set at least one of: ANTHROPIC_API_KEY, GROQ_API_KEY, "
+                "NVIDIA_API_KEY, or OLLAMA_BASE_URL."
+            ),
+        )
 
     try:
         from app.websocket.voice import WHISPER_AVAILABLE, transcribe_audio

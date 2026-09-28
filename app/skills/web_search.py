@@ -11,6 +11,12 @@ logger = logging.getLogger(__name__)
 async def handle_web_search(query: str) -> dict:
     settings = get_settings()
 
+    if not settings.web_search_enabled:
+        return {
+            "error": "Web search is not configured — set SEARXNG_URL in .env",
+            "query": query,
+        }
+
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
@@ -60,5 +66,7 @@ register_skill(
         handler=handle_web_search,
         timeout=20,
         returns_external_content=True,
+        # Offered to the LLM only when SearXNG is configured.
+        enabled_check=lambda: get_settings().web_search_enabled,
     )
 )

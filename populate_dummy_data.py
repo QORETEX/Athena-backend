@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
-Populate the Athena backend with dummy data for testing
-Run this with the server running on http://localhost:8000
+Populate the Athena backend with dummy data for testing.
+Set ATHENA_BASE_URL to point at a non-local server; defaults to http://localhost:8000.
 """
 import asyncio
+import os
 import sys
 from httpx import AsyncClient
 from tests.dummy_data import DummyDataGenerator
 
+_BASE_URL = os.environ.get("ATHENA_BASE_URL", "http://localhost:8000")
+
 
 async def populate_data():
     """Populate the database with dummy data."""
-    base_url = "http://localhost:8000"
+    base_url = _BASE_URL
 
     try:
         async with AsyncClient(base_url=base_url, timeout=30.0) as client:
@@ -30,7 +33,7 @@ async def populate_data():
             except Exception as e:
                 print(f"❌ Cannot connect to server at {base_url}")
                 print(f"   Error: {e}")
-                print("\n💡 Make sure the server is running:")
+                print(f"\n💡 Make sure the server is running (ATHENA_BASE_URL={base_url}):")
                 print("   python main.py")
                 return False
 
@@ -106,7 +109,7 @@ async def populate_data():
 
 async def clear_data():
     """Clear all test data from the database."""
-    base_url = "http://localhost:8000"
+    base_url = _BASE_URL
 
     print("=" * 70)
     print("Clearing all data from Athena backend...")
@@ -138,7 +141,7 @@ async def clear_data():
 
 async def show_stats():
     """Show current database statistics."""
-    base_url = "http://localhost:8000"
+    base_url = _BASE_URL
 
     print("=" * 70)
     print("Current Database Statistics")
@@ -192,8 +195,8 @@ Examples:
     python populate_dummy_data.py clear
     python populate_dummy_data.py stats
 
-Note: The server must be running on http://localhost:8000
-      Start it with: python main.py
+Note: The server must be running. Set ATHENA_BASE_URL to override
+      the default target (http://localhost:8000). Start with: python main.py
     """)
 
 

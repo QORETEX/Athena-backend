@@ -15,7 +15,18 @@ from app.skills.smart_home import handle_smart_home
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/smart-home", tags=["smart-home"])
+
+def _require_smart_home():
+    """Dependency: reject all smart-home requests when HASS_URL or HASS_TOKEN is unset."""
+    if not get_settings().smart_home_enabled:
+        raise HTTPException(status_code=503, detail="Smart home is not configured")
+
+
+router = APIRouter(
+    prefix="/api/smart-home",
+    tags=["smart-home"],
+    dependencies=[Depends(_require_smart_home)],
+)
 
 
 # ── Request / Response models ──────────────────────────────
@@ -149,10 +160,8 @@ async def remove_device(device_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.get("/discover")
 async def discover_devices():
-    """Query Home Assistant for all available entities. Requires HASS_TOKEN in .env."""
+    """Query Home Assistant for all available entities."""
     settings = get_settings()
-    if not settings.hass_token:
-        return {"error": "Home Assistant not configured — set HASS_URL and HASS_TOKEN in .env"}
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:

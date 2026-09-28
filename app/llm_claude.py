@@ -1,6 +1,6 @@
 """
 Claude AI integration - Primary LLM for Athena
-Uses Claude for best intelligence, falls back to Ollama if unavailable
+Uses Claude for best intelligence, falls back to Groq → NVIDIA → Ollama.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class ClaudeLLM:
-    """Claude AI client with Ollama fallback"""
+    """Claude AI client with Groq / NVIDIA / Ollama fallback chain."""
 
     def __init__(self):
         self.settings = get_settings()
@@ -30,7 +30,7 @@ class ClaudeLLM:
             self.available = True
             logger.info("✅ Claude AI enabled (primary LLM)")
         else:
-            logger.warning("⚠️  No Claude API key - using Ollama only")
+            logger.warning("⚠️  No Claude API key - using fallback chain")
 
     async def chat(
         self,
@@ -39,24 +39,17 @@ class ClaudeLLM:
         max_tokens: int = 2000,
     ) -> dict:
         """
-        Chat with Claude, fallback to Groq/Ollama if unavailable
-
-        Fallback order: Claude → Groq → Ollama
-
-        Returns same format as ollama chat_with_tools for compatibility
+        Chat with Claude; fall back to Groq → NVIDIA → Ollama on failure.
+        Returns same format as ollama chat_with_tools for compatibility.
         """
         if not self.available or not self.client:
             logger.debug("Claude unavailable, trying fallback")
             return await self._fallback_chat(messages, tools, max_tokens)
 
         try:
-            # Try Claude first
-            response = await self._chat_claude(messages, tools, max_tokens)
-            return response
-
+            return await self._chat_claude(messages, tools, max_tokens)
         except Exception as e:
             logger.warning(f"Claude failed ({e}), trying fallback")
-            # Fallback to Groq or Ollama
             return await self._fallback_chat(messages, tools, max_tokens)
 
     async def _fallback_chat(
@@ -65,42 +58,46 @@ class ClaudeLLM:
         tools: Optional[list[dict]],
         max_tokens: int,
     ) -> dict:
-        """
-        Try fallback LLMs in order: Groq → NVIDIA → Ollama
+        """Try fallback LLMs in order: Groq → NVIDIA → Ollama (if enabled)."""
 
-        Priority:
-        1. Groq - Fast and free (30 req/min)
-        2. NVIDIA NIM - Free, good quality
-        3. Ollama - Local, always available
-        """
-
-        # Try Groq first (fastest, free)
         try:
             from app.llm_groq import get_groq_llm
 
             groq = get_groq_llm()
             if groq.available:
                 logger.info("🔄 Using Groq (Claude unavailable)")
-                response = await groq.chat(messages, max_tokens=max_tokens)
-                return response
+                return await groq.chat(messages, max_tokens=max_tokens)
         except Exception as e:
             logger.debug(f"Groq failed ({e}), trying NVIDIA")
 
-        # Try NVIDIA NIM second (free, reliable)
         try:
             from app.llm_nvidia import get_nvidia_llm
 
             nvidia = get_nvidia_llm()
             if nvidia.available:
                 logger.info("🔄 Using NVIDIA NIM (Claude & Groq unavailable)")
-                response = await nvidia.chat(messages, max_tokens=max_tokens)
-                return response
+                return await nvidia.chat(messages, max_tokens=max_tokens)
         except Exception as e:
             logger.debug(f"NVIDIA failed ({e}), trying Ollama")
 
-        # Fall back to Ollama (local)
-        logger.info("🔄 Using Ollama (all cloud LLMs unavailable)")
-        return await ollama_chat_with_tools(messages, tools)
+        # Ollama: only attempt when configured — avoids a 120 s connection timeout.
+        settings = get_settings()
+        if settings.ollama_enabled:
+            logger.info("🔄 Using Ollama (all cloud LLMs unavailable)")
+            return await ollama_chat_with_tools(messages, tools)
+
+        logger.error("No LLM provider is available")
+        return {
+            "message": {
+                "role": "assistant",
+                "content": (
+                    "No language model is available. "
+                    "Please configure at least one of: ANTHROPIC_API_KEY, GROQ_API_KEY, "
+                    "NVIDIA_API_KEY, or OLLAMA_BASE_URL."
+                ),
+            },
+            "error": "no_llm_available",
+        }
 
     async def _chat_claude(
         self,
@@ -108,8 +105,7 @@ class ClaudeLLM:
         tools: Optional[list[dict]],
         max_tokens: int
     ) -> dict:
-        """Chat with Claude API"""
-        # Separate system message from conversation
+        """Chat with the Claude API."""
         system_prompt = ""
         conversation = []
 
@@ -119,13 +115,11 @@ class ClaudeLLM:
             else:
                 conversation.append(msg)
 
-        # Convert tools to Claude format if provided
-        claude_tools = None
-        if tools:
-            claude_tools = self._convert_tools_to_claude(tools)
+        claude_tools = self._convert_tools_to_claude(tools) if tools else None
 
         if SECURITY_INSTRUCTION not in system_prompt:
             system_prompt = system_prompt + ("\n" if system_prompt else "") + SECURITY_INSTRUCTION
+
         response = await self.client.messages.create(
             model=self.settings.claude_model,
             max_tokens=max_tokens,
@@ -134,30 +128,22 @@ class ClaudeLLM:
             tools=claude_tools or []
         )
 
-        # Convert Claude response to Ollama-compatible format
         return self._convert_claude_to_ollama_format(response)
 
     def _convert_tools_to_claude(self, ollama_tools: list[dict]) -> list[dict]:
-        """Convert Ollama tool format to Claude tool format"""
+        """Convert Ollama tool format to Claude tool format."""
         claude_tools = []
-
         for tool in ollama_tools:
-            # Ollama format: {type: "function", function: {name, description, parameters}}
             func = tool.get("function", {})
-
-            claude_tool = {
+            claude_tools.append({
                 "name": func.get("name", ""),
                 "description": func.get("description", ""),
                 "input_schema": func.get("parameters", {})
-            }
-
-            claude_tools.append(claude_tool)
-
+            })
         return claude_tools
 
     def _convert_claude_to_ollama_format(self, claude_response) -> dict:
-        """Convert Claude response to Ollama-compatible format"""
-        # Extract content and tool calls
+        """Convert Claude response to Ollama-compatible format."""
         content_text = ""
         tool_calls = []
 
@@ -165,7 +151,6 @@ class ClaudeLLM:
             if block.type == "text":
                 content_text += block.text
             elif block.type == "tool_use":
-                # Convert to Ollama tool call format
                 tool_calls.append({
                     "function": {
                         "name": block.name,
@@ -173,17 +158,14 @@ class ClaudeLLM:
                     }
                 })
 
-        # Build Ollama-compatible response
         result = {
             "message": {
                 "role": "assistant",
                 "content": content_text,
             }
         }
-
         if tool_calls:
             result["message"]["tool_calls"] = tool_calls
-
         return result
 
     async def stream_chat(
@@ -191,21 +173,15 @@ class ClaudeLLM:
         messages: list[dict],
         max_tokens: int = 2000
     ):
-        """
-        Stream Claude responses for instant feel
-        Yields text chunks as they arrive
-        """
+        """Stream Claude responses. Falls back to Ollama (no streaming) if unavailable."""
         if not self.available or not self.client:
-            # Ollama doesn't support streaming easily, just return full response
             response = await ollama_chat_with_tools(messages, None)
             yield response["message"]["content"]
             return
 
         try:
-            # Separate system message
             system_prompt = ""
             conversation = []
-
             for msg in messages:
                 if msg["role"] == "system":
                     system_prompt = msg["content"]
@@ -214,6 +190,7 @@ class ClaudeLLM:
 
             if SECURITY_INSTRUCTION not in system_prompt:
                 system_prompt = system_prompt + ("\n" if system_prompt else "") + SECURITY_INSTRUCTION
+
             async with self.client.messages.stream(
                 model=self.settings.claude_model,
                 max_tokens=max_tokens,
@@ -225,7 +202,6 @@ class ClaudeLLM:
 
         except Exception as e:
             logger.warning(f"Claude streaming failed: {e}")
-            # Fallback: full response from Ollama
             response = await ollama_chat_with_tools(messages, None)
             yield response["message"]["content"]
 
@@ -235,7 +211,7 @@ _claude_llm: Optional[ClaudeLLM] = None
 
 
 def get_claude_llm() -> ClaudeLLM:
-    """Get or create Claude LLM instance"""
+    """Get or create the Claude LLM instance."""
     global _claude_llm
     if _claude_llm is None:
         _claude_llm = ClaudeLLM()
