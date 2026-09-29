@@ -47,6 +47,8 @@ try:
 except ImportError:
     logger.info("torch not installed — VAD disabled, relying on client audio_end")
 
+from app.audio.denoise import denoise_audio  # noqa: E402 — must follow optional imports above
+
 # ── Lazy model singletons ───────────────────────────────────────────────────
 
 _whisper_model = None
@@ -110,7 +112,7 @@ async def set_state(ws: WebSocket, state: AssistantState):
 # ── VAD ──────────────────────────────────────────────────────────────────────
 
 
-def check_vad(audio_buffer: bytearray) -> bool:
+def check_vad(audio_buffer: bytes | bytearray) -> bool:
     if not VAD_AVAILABLE:
         return False
 
@@ -158,8 +160,6 @@ def transcribe_audio(audio_bytes: bytes) -> str:
     model = get_whisper()
     if model is None:
         return "[STT unavailable]"
-
-    from app.audio.denoise import denoise_audio
 
     cleaned = denoise_audio(audio_bytes)
 
@@ -506,6 +506,7 @@ async def voice_endpoint(ws: WebSocket):
             await ws.close(code=1008)
             return
 
+        ws.state.user_id = _user_id
         logger.info("Voice WebSocket connected")
 
         audio_buffer = bytearray()
@@ -524,7 +525,7 @@ async def voice_endpoint(ws: WebSocket):
                     await ws.close(code=1009)
                     return
                 audio_buffer.extend(incoming)
-                if check_vad(audio_buffer):
+                if await asyncio.to_thread(check_vad, bytes(audio_buffer)):
                     data_copy = bytes(audio_buffer)
                     audio_buffer.clear()
                     current_task = asyncio.create_task(
