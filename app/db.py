@@ -427,39 +427,49 @@ class UserKnowledge(Base):
     )
 
 
-engine = None
-async_session: Optional[async_sessionmaker[AsyncSession]] = None
-
-
 def _set_wal_mode(dbapi_conn, connection_record):
     cursor = dbapi_conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.close()
 
 
-async def init_db(database_url: str):
-    global engine, async_session
-
-    is_sqlite = "sqlite" in database_url.lower()
-    is_postgres = "postgresql" in database_url.lower()
-
-    if is_postgres:
-        engine = create_async_engine(
-            database_url,
-            echo=False,
-            pool_size=10,
-            max_overflow=20,
-            pool_pre_ping=True,
+def _build_engine_and_session():
+    # Deferred import avoids a circular-import risk if app.config ever imports
+    # from app.db.  It also lets conftest.py replace get_settings before this
+    # module is first imported, so tests always get the in-memory test engine.
+    from app.config import get_settings
+    url = get_settings().database_url
+    if "postgresql" in url.lower():
+        _engine = create_async_engine(
+            url, echo=False, pool_size=10, max_overflow=20, pool_pre_ping=True
         )
         logger.info("Using PostgreSQL database")
     else:
-        engine = create_async_engine(database_url, echo=False)
-        event.listen(engine.sync_engine, "connect", _set_wal_mode)
+        _engine = create_async_engine(url, echo=False)
+        event.listen(_engine.sync_engine, "connect", _set_wal_mode)
         logger.info("Using SQLite database")
+    return _engine, async_sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
 
-    async_session = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
+
+# Initialized at import time so every `from app.db import async_session` binding
+# captures a live factory, not None.  Previously init_db() used `global` to
+# reassign these after import, but that assignment was invisible to modules that
+# had already bound the name to None.
+engine, async_session = _build_engine_and_session()
+
+
+def get_async_session() -> async_sessionmaker[AsyncSession]:
+    """Return the module-level async session factory."""
+    return async_session
+
+
+async def init_db(database_url: str):
+    """No-op — engine and sessionmaker are initialized at module load from get_settings().
+
+    Kept for backward compatibility; main.py calls this during lifespan startup.
+    The database_url argument is accepted but ignored.
+    """
+    pass
 
 
 async def get_db():

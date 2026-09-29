@@ -58,7 +58,7 @@ def serialize_tool_result(skill: Optional[Skill], tool_name: str, result: object
 
 
 def get_ollama_tools() -> list[dict]:
-    """Return tool descriptors for all currently-available skills."""
+    """Return tool descriptors for all currently-available skills (including client_executed)."""
     return [
         {
             "type": "function",
@@ -70,4 +70,26 @@ def get_ollama_tools() -> list[dict]:
         }
         for s in _registry.values()
         if s.is_available()
+    ]
+
+
+def get_server_tools() -> list[dict]:
+    """Return tool descriptors for server-executable skills only.
+
+    Excludes client_executed skills — use this for HTTP endpoints where the
+    server handles all tool calls directly.  The WebSocket voice endpoint uses
+    get_ollama_tools() instead because it can delegate client_executed tools
+    back to the connected device via the TOOL_RESULT_CLIENT protocol message.
+    """
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": s.name,
+                "description": s.description,
+                "parameters": s.parameters,
+            },
+        }
+        for s in _registry.values()
+        if s.is_available() and not s.client_executed
     ]

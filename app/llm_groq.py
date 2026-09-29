@@ -112,7 +112,9 @@ class GroqLLM:
                 data = response.json()
 
                 message = data["choices"][0]["message"]
-                content = message.get("content") or message.get("reasoning", "")
+                # reasoning / reasoning_content are internal chain-of-thought fields —
+                # they must never be returned to the client or stored in history.
+                content = message.get("content") or ""
                 raw_tcs = message.get("tool_calls") or []
 
                 if not content and not raw_tcs:

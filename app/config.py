@@ -141,6 +141,11 @@ class Settings(BaseSettings):
     # ── IP debug route ───────────────────────────────────────────
     debug_client_ip: bool = False
 
+    # ── Timezone ─────────────────────────────────────────────────
+    # IANA timezone name used to display the current time in the system prompt.
+    # Per-user overrides come in Phase 2B.
+    default_timezone: str = "UTC"
+
     # ── Access logging ────────────────────────────────────────────
     access_log: bool = True
     # Comma-separated path prefixes excluded from access logging.

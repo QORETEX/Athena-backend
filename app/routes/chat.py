@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
@@ -13,7 +14,7 @@ from app.llm import build_system_prompt, chat_with_tools
 from app.llm_claude import get_claude_llm
 from app.memory.store import get_memory_store
 from app.rate_limit import limiter
-from app.skills.base import get_ollama_tools, get_skill, serialize_tool_result
+from app.skills.base import get_ollama_tools, get_server_tools, get_skill, serialize_tool_result
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,10 @@ class TextChatRequest(BaseModel):
     message: str
     history: list[dict] = []
     tts: bool = False
+    # Set to true when the calling client can execute client_executed tools
+    # (i.e. it will send TOOL_RESULT_CLIENT-equivalent responses).  Defaults
+    # to false so calendar/device tools are excluded from HTTP chat.
+    client_tools: bool = False
 
 
 class TextChatResponse(BaseModel):
@@ -49,11 +54,54 @@ class AudioChatResponse(BaseModel):
 # ── Shared helpers ─────────────────────────────────────────
 
 
+def _summarize_tool_results(tool_results: list[dict]) -> str:
+    """Build a minimal user-facing confirmation from raw tool results.
+
+    Used only when the LLM returns empty content after the tool loop and a
+    follow-up call also yields nothing — the last-resort fallback.
+    """
+    parts: list[str] = []
+    for tr in tool_results:
+        tool_name = tr.get("tool", "")
+        result = tr.get("result", {})
+        if not isinstance(result, dict):
+            continue
+        if result.get("success"):
+            if tool_name == "set_reminder":
+                remind_at = result.get("remind_at", "")
+                if remind_at:
+                    try:
+                        dt = datetime.fromisoformat(remind_at)
+                        parts.append(
+                            f"Reminder set for {dt.strftime('%a')} {dt.day} {dt.strftime('%b, %H:%M')}."
+                        )
+                    except ValueError:
+                        parts.append("Reminder set.")
+                else:
+                    parts.append("Reminder set.")
+            elif tool_name == "save_note":
+                parts.append("Note saved.")
+            elif tool_name == "create_calendar_event":
+                parts.append("Calendar event created.")
+            else:
+                parts.append("Done.")
+        elif "error" in result:
+            parts.append(f"Error: {result['error']}")
+    return " ".join(parts) if parts else "Done."
+
+
 async def _run_chat_pipeline(
     user_text: str,
     history: list[dict],
+    client_tools: bool = False,
 ) -> tuple[str, list[dict], list[dict], str | None]:
-    """Run the LLM + tool-dispatch pipeline. Returns (reply, tool_calls, tool_results, error)."""
+    """Run the LLM + tool-dispatch pipeline. Returns (reply, tool_calls, tool_results, error).
+
+    client_tools=True includes client_executed skills in the tool list (the
+    caller is responsible for handling any tool results they send back).
+    client_tools=False (default) uses only server-side tools so the LLM never
+    calls calendar/device skills that the server cannot execute.
+    """
 
     memory_store = get_memory_store()
     memory_context = None
@@ -62,13 +110,17 @@ async def _run_chat_pipeline(
         if results:
             memory_context = results
 
-    system_prompt = build_system_prompt(memory_context)
+    tools = get_ollama_tools() if client_tools else get_server_tools()
+
+    system_prompt = build_system_prompt(
+        memory_context,
+        available_tools=tools,
+        memory_available=memory_store is not None and memory_store.available,
+    )
 
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(history[-20:])
     messages.append({"role": "user", "content": user_text})
-
-    tools = get_ollama_tools()
 
     claude = get_claude_llm()
     response = await claude.chat(messages, tools if tools else None)
@@ -145,6 +197,15 @@ async def _run_chat_pipeline(
 
     reply = assistant_message.get("content", "")
 
+    # When tool calls were made and the post-tool response has empty content,
+    # make one more call (no tools — forces a text reply) to get a user-facing
+    # confirmation.  If that is also empty, build a summary from tool results.
+    if not reply and all_tool_calls:
+        followup = await claude.chat(messages, None)
+        reply = followup.get("message", {}).get("content", "") or ""
+        if not reply:
+            reply = _summarize_tool_results(all_tool_results)
+
     if memory_store:
         await memory_store.add_memory(user_text, {"role": "user", "type": "chat"})
         await memory_store.add_memory(reply, {"role": "assistant", "type": "chat"})
@@ -196,7 +257,7 @@ async def text_chat(request: Request, body: TextChatRequest):
         )
 
     reply, tool_calls, tool_results, error = await _run_chat_pipeline(
-        body.message, body.history
+        body.message, body.history, body.client_tools
     )
 
     if error == "llm_providers_failed":
@@ -228,6 +289,7 @@ async def audio_chat(
     audio: UploadFile = File(..., description="Audio file (WAV or raw PCM, 16kHz 16-bit mono)"),
     history: str = Form(default="[]", description="JSON array of past messages"),
     tts: bool = Form(default=True, description="Return reply as audio"),
+    client_tools: bool = Form(default=False, description="Include client-executed tools"),
 ):
     """Send audio, get a transcription + LLM reply (optionally with TTS audio back)."""
     if not get_settings().any_llm_configured:
@@ -281,7 +343,7 @@ async def audio_chat(
         parsed_history = []
 
     reply, tool_calls, tool_results, error = await _run_chat_pipeline(
-        transcript, parsed_history
+        transcript, parsed_history, client_tools
     )
 
     if error == "llm_providers_failed":

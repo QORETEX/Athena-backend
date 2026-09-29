@@ -284,13 +284,19 @@ async def process_utterance(
             if results:
                 memory_context = results
 
-        system_prompt = build_system_prompt(memory_context)
+        # Voice endpoint offers client_executed tools — the WS protocol delivers
+        # them to the device and waits for a TOOL_RESULT_CLIENT frame back.
+        tools = get_ollama_tools()
+
+        system_prompt = build_system_prompt(
+            memory_context,
+            available_tools=tools,
+            memory_available=memory_store is not None and memory_store.available,
+        )
 
         messages = [{"role": "system", "content": system_prompt}]
         messages.extend(session_history[-20:])
         messages.append({"role": "user", "content": transcript})
-
-        tools = get_ollama_tools()
         claude = get_claude_llm()
         response = await claude.chat(messages, tools if tools else None)
 
