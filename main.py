@@ -10,6 +10,7 @@ from app.auth.dependencies import get_current_user
 from app.config import get_settings
 from app.db import init_db
 from app.logging_config import setup_logging
+from app.middleware.access_log import AccessLogMiddleware
 from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
@@ -127,6 +128,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Must be added AFTER CORSMiddleware so Starlette places it outermost:
+# request flow → AccessLog → CORS → ExceptionMiddleware → routes
+app.add_middleware(AccessLogMiddleware)
 
 # ── Route imports ────────────────────────────────────────────────
 

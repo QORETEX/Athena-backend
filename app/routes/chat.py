@@ -82,10 +82,33 @@ async def _run_chat_pipeline(
 
     tool_calls = assistant_message.get("tool_calls")
     if tool_calls:
+        # OpenAI-compatible providers (Groq, NVIDIA) require the assistant message with
+        # tool_calls to appear in history before the tool result messages.
+        openai_tcs = []
+        for tc in tool_calls:
+            func = tc.get("function", {})
+            args = func.get("arguments", {})
+            entry: dict = {
+                "type": "function",
+                "function": {
+                    "name": func.get("name", ""),
+                    "arguments": json.dumps(args) if isinstance(args, dict) else (args or "{}"),
+                },
+            }
+            if tc.get("id"):
+                entry["id"] = tc["id"]
+            openai_tcs.append(entry)
+        messages.append({
+            "role": "assistant",
+            "content": assistant_message.get("content") or "",
+            "tool_calls": openai_tcs,
+        })
+
         for tc in tool_calls:
             func = tc.get("function", {})
             tool_name = func.get("name", "")
             tool_args = func.get("arguments", {})
+            tc_id = tc.get("id")
             all_tool_calls.append({"tool": tool_name, "args": tool_args})
 
             skill = get_skill(tool_name)
@@ -109,7 +132,13 @@ async def _run_chat_pipeline(
                 result = {"error": f"Skill '{tool_name}' has no handler"}
 
             all_tool_results.append({"tool": tool_name, "result": result})
-            messages.append({"role": "tool", "content": serialize_tool_result(skill, tool_name, result)})
+            tool_result_msg: dict = {
+                "role": "tool",
+                "content": serialize_tool_result(skill, tool_name, result),
+            }
+            if tc_id:
+                tool_result_msg["tool_call_id"] = tc_id
+            messages.append(tool_result_msg)
 
         response = await claude.chat(messages, tools if tools else None)
         assistant_message = response.get("message", {})

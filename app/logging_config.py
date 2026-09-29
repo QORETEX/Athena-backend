@@ -20,6 +20,9 @@ def setup_logging(level: str = "info", debug: bool = False, log_sql: bool = Fals
     app_level = logging.DEBUG if debug else root_level
     logging.getLogger("app").setLevel(app_level)
     logging.getLogger("main").setLevel(app_level)
+    # Access log inherits root level so INFO lines appear; explicit to survive
+    # any future change to the noisy list below.
+    logging.getLogger("access").setLevel(root_level)
 
     # Pin noisy third-party libraries so they never inherit DEBUG from root.
     for noisy in (
@@ -33,6 +36,7 @@ def setup_logging(level: str = "info", debug: bool = False, log_sql: bool = Fals
         "multipart",
         "urllib3",
         "hpack",
+        # Suppress uvicorn's own access log; ours replaces it.
         "uvicorn.access",
         "chromadb",
         "faster_whisper",

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 import jwt
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,7 @@ _WWW_AUTH = {"WWW-Authenticate": 'Bearer realm="athena"'}
 
 
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
@@ -29,6 +30,9 @@ async def get_current_user(
     user = await db.get(User, int(payload["sub"]))
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or inactive", headers=_WWW_AUTH)
+
+    # Let the access log middleware know which user was authenticated.
+    request.state.user_id = user.id
     return user
 
 

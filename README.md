@@ -77,7 +77,7 @@ cp .env.example .env
 # - GROQ_API_KEY (get free from console.groq.com)
 
 # Apply migrations and start server
-alembic upgrade head && uvicorn main:app --reload
+alembic upgrade head && uvicorn main:app --reload --no-access-log
 ```
 
 Server runs at: **http://localhost:8000**

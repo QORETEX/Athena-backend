@@ -54,6 +54,7 @@ async def _authenticate(ws: WebSocket) -> bool:
         await ws.close(code=1008)
         return False
 
+    ws.state.user_id = user_id
     return True
 
 

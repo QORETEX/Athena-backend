@@ -101,10 +101,25 @@ class Settings(BaseSettings):
     # ── Groq API ─────────────────────────────────────────────────
     groq_api_key: str = ""
     groq_model: str = "openai/gpt-oss-20b"
+    groq_max_tokens: int = 1024
 
     # ── NVIDIA NIM API ───────────────────────────────────────────
     nvidia_api_key: str = ""
-    nvidia_model: str = "nvidia/llama-3.1-nemotron-70b-instruct"
+    nvidia_model: str = "nvidia/nemotron-3-super-120b-a12b"
+    nvidia_max_tokens: int = 1024
+    # Nemotron reasoning models think before answering; disabling saves 5–30 s per call.
+    # Switch: chat_template_kwargs: {"thinking": False}  (verified against live API)
+    nvidia_reasoning: bool = False
+
+    # ── LLM timeouts & chain deadline ────────────────────────────
+    # Connect timeout: fail fast if the server is unreachable.
+    llm_connect_timeout: int = 5
+    # Read timeout: max wait for the first response byte after the request is sent.
+    llm_read_timeout: int = 25
+    # Chain deadline: total budget for the entire Groq→NVIDIA→Ollama fallback sequence.
+    # Each provider gets min(llm_read_timeout, remaining_budget) for its read phase.
+    # Providers are skipped once the budget is spent.
+    llm_chain_deadline: int = 40
 
     # ── CORS ─────────────────────────────────────────────────────
     cors_origins: str = ""
@@ -125,6 +140,11 @@ class Settings(BaseSettings):
 
     # ── IP debug route ───────────────────────────────────────────
     debug_client_ip: bool = False
+
+    # ── Access logging ────────────────────────────────────────────
+    access_log: bool = True
+    # Comma-separated path prefixes excluded from access logging.
+    access_log_exclude: str = "/health"
 
     # ── Validation ───────────────────────────────────────────────
 
