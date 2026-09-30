@@ -3,6 +3,7 @@ from app.skills.base import Skill, register_skill
 register_skill(
     Skill(
         name="device_control",
+        summary="Control device settings",
         description="Control device settings such as volume, brightness, flashlight, do-not-disturb mode, or set alarms. Executed on the user's phone.",
         parameters={
             "type": "object",

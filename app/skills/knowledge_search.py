@@ -20,6 +20,7 @@ async def handle_knowledge_search(query: str, top_k: int = 5) -> dict:
 register_skill(
     Skill(
         name="search_knowledge",
+        summary="Search personal documents",
         description="Search the user's offline knowledge base (ingested documents like PDFs, text files). Use this when the user asks about their own documents or stored information.",
         parameters={
             "type": "object",

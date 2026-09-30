@@ -156,7 +156,12 @@ class GroqLLM:
                         err_msg or "-",
                     )
                     # tool_use_failed: model produced a malformed tool call; retry once immediately.
+                    # Exception: "Tool choice is none, but model called a tool" means we sent
+                    # no tools but the model still tried to call one — retrying the identical
+                    # request won't help, so raise immediately.
                     if status == 400 and err_code == "tool_use_failed" and attempt == 0:
+                        if "tool choice is none" in err_msg.lower():
+                            raise GroqAPIError(status, err_type, err_code, err_msg) from e
                         logger.info("Groq: model produced invalid tool call — retrying once")
                         _tool_use_retried = True
                         continue

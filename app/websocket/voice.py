@@ -200,7 +200,14 @@ async def stream_tts(text: str, ws: WebSocket):
         return
 
     try:
-        raw_audio = await asyncio.to_thread(_synthesize_speech, text)
+        raw_audio = await asyncio.wait_for(
+            asyncio.to_thread(_synthesize_speech, text),
+            timeout=get_settings().tts_timeout,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("TTS synthesis timed out after %ds", get_settings().tts_timeout)
+        await send_msg(ws, MessageType.TTS_END, {})
+        return
     except Exception:
         logger.exception("TTS synthesis failed")
         await send_msg(ws, MessageType.TTS_END, {})
@@ -231,11 +238,21 @@ async def process_utterance(
     ws: WebSocket,
     session_history: list[dict],
     client_tool_futures: dict[str, asyncio.Future],
+    user_id: int | None = None,
 ):
     try:
         # 1. Transcribe
         await set_state(ws, AssistantState.TRANSCRIBING)
-        transcript = await asyncio.to_thread(transcribe_audio, audio_data)
+        try:
+            transcript = await asyncio.wait_for(
+                asyncio.to_thread(transcribe_audio, audio_data),
+                timeout=get_settings().stt_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("STT timed out after %ds", get_settings().stt_timeout)
+            await send_msg(ws, MessageType.ERROR, {"message": "Transcription timed out"})
+            await set_state(ws, AssistantState.IDLE)
+            return
 
         if not transcript or transcript == "[STT unavailable]":
             await send_msg(
@@ -246,7 +263,6 @@ async def process_utterance(
             if not transcript:
                 await set_state(ws, AssistantState.IDLE)
                 return
-            # Even if STT unavailable, continue so the user gets feedback
 
         await send_msg(ws, MessageType.FINAL_TRANSCRIPT, {"text": transcript})
 
@@ -272,125 +288,61 @@ async def process_utterance(
             await set_state(ws, AssistantState.IDLE)
             return
 
-        from app.llm import build_system_prompt
-        from app.llm_claude import get_claude_llm
+        # 3. Run shared pipeline with WS-specific callbacks
+        from app.chat.pipeline import run_chat_turn
         from app.memory.store import get_memory_store
-        from app.skills.base import get_ollama_tools, get_skill, serialize_tool_result
 
-        memory_store = get_memory_store()
-        memory_context = None
-        if memory_store:
-            results = await memory_store.search(transcript, top_k=5)
-            if results:
-                memory_context = results
+        async def _on_tool_call(tool_name: str, args: dict) -> None:
+            await send_msg(ws, MessageType.TOOL_CALL, {"tool": tool_name, "args": args})
 
-        # Voice endpoint offers client_executed tools — the WS protocol delivers
-        # them to the device and waits for a TOOL_RESULT_CLIENT frame back.
-        tools = get_ollama_tools()
+        async def _on_tool_result(tool_name: str, result: dict) -> None:
+            await send_msg(ws, MessageType.TOOL_RESULT, {"tool": tool_name, "result": result})
 
-        system_prompt = build_system_prompt(
-            memory_context,
-            available_tools=tools,
-            memory_available=memory_store is not None and memory_store.available,
+        result = await run_chat_turn(
+            transcript,
+            list(session_history),
+            client_capabilities=True,
+            user_id=user_id,
+            on_tool_call=_on_tool_call,
+            on_tool_result=_on_tool_result,
+            client_tool_futures=client_tool_futures,
         )
 
-        messages = [{"role": "system", "content": system_prompt}]
-        messages.extend(session_history[-20:])
-        messages.append({"role": "user", "content": transcript})
-        claude = get_claude_llm()
-        response = await claude.chat(messages, tools if tools else None)
-
-        if response.get("error") == "llm_providers_failed":
+        if result.error == "llm_providers_failed":
             await send_msg(ws, MessageType.ERROR, {
                 "code": "llm_providers_failed",
-                "message": response.get("message", {}).get("content", "All LLM providers failed"),
+                "message": result.reply,
             })
             await set_state(ws, AssistantState.IDLE)
             return
 
-        assistant_message = response.get("message", {})
-
-        # 3. Handle tool calls
-        tool_calls = assistant_message.get("tool_calls")
-        if tool_calls:
-            for tc in tool_calls:
-                func = tc.get("function", {})
-                tool_name = func.get("name", "")
-                tool_args = func.get("arguments", {})
-
-                await send_msg(
-                    ws,
-                    MessageType.TOOL_CALL,
-                    {"tool": tool_name, "args": tool_args},
-                )
-
-                skill = get_skill(tool_name)
-                if skill is None:
-                    result = {"error": f"Unknown skill: {tool_name}"}
-                elif skill.client_executed:
-                    future: asyncio.Future = asyncio.get_running_loop().create_future()
-                    client_tool_futures[tool_name] = future
-                    try:
-                        result = await asyncio.wait_for(future, timeout=skill.timeout)
-                    except asyncio.TimeoutError:
-                        result = {"error": "Client did not respond in time"}
-                    finally:
-                        client_tool_futures.pop(tool_name, None)
-                elif skill.handler:
-                    try:
-                        handler_result = skill.handler(**tool_args)
-                        if asyncio.iscoroutine(handler_result):
-                            result = await asyncio.wait_for(
-                                handler_result, timeout=skill.timeout
-                            )
-                        else:
-                            result = handler_result
-                    except asyncio.TimeoutError:
-                        result = {"error": f"Skill '{tool_name}' timed out"}
-                    except Exception as e:
-                        logger.exception("Skill %s failed", tool_name)
-                        result = {"error": str(e)}
-                else:
-                    result = {"error": f"Skill '{tool_name}' has no handler"}
-
-                await send_msg(
-                    ws,
-                    MessageType.TOOL_RESULT,
-                    {"tool": tool_name, "result": result},
-                )
-
-                messages.append({"role": "tool", "content": serialize_tool_result(skill, tool_name, result)})
-
-            response = await claude.chat(messages, tools if tools else None)
-            assistant_message = response.get("message", {})
-
-        # 4. Extract reply text
-        assistant_text = assistant_message.get("content", "")
-        await send_msg(ws, MessageType.ASSISTANT_TEXT, {"text": assistant_text})
+        # 4. Send reply text
+        await send_msg(ws, MessageType.ASSISTANT_TEXT, {"text": result.reply})
 
         # 5. TTS
         await set_state(ws, AssistantState.SPEAKING)
-        await stream_tts(assistant_text, ws)
+        await stream_tts(result.reply, ws)
 
         # 6. Done
         await set_state(ws, AssistantState.IDLE)
 
-        # 7. Update session history
+        # 7. Update session history (caller's list, not the copy we passed in)
         session_history.append({"role": "user", "content": transcript})
-        session_history.append({"role": "assistant", "content": assistant_text})
+        session_history.append({"role": "assistant", "content": result.reply})
         if len(session_history) > 40:
             session_history[:] = session_history[-40:]
 
         # 8. Persist to memory & conversation log
+        memory_store = get_memory_store()
         if memory_store:
             await memory_store.add_memory(
                 transcript, {"role": "user", "type": "conversation"}
             )
             await memory_store.add_memory(
-                assistant_text, {"role": "assistant", "type": "conversation"}
+                result.reply, {"role": "assistant", "type": "conversation"}
             )
 
-        await _log_conversation(transcript, assistant_text, tool_calls)
+        await _log_conversation(transcript, result.reply, result.tool_calls or None)
 
     except asyncio.CancelledError:
         logger.info("Pipeline cancelled (barge-in)")
@@ -540,6 +492,7 @@ async def voice_endpoint(ws: WebSocket):
                             ws,
                             session_history,
                             client_tool_futures,
+                            user_id=_user_id,
                         )
                     )
                 continue
@@ -581,6 +534,7 @@ async def voice_endpoint(ws: WebSocket):
                             ws,
                             session_history,
                             client_tool_futures,
+                            user_id=_user_id,
                         )
                     )
 

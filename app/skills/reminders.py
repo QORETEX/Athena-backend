@@ -71,6 +71,7 @@ async def handle_list_reminders() -> dict:
 register_skill(
     Skill(
         name="set_reminder",
+        summary="Set a reminder",
         description="Create a reminder for the user at a specific date/time.",
         parameters={
             "type": "object",
@@ -99,6 +100,7 @@ register_skill(
 register_skill(
     Skill(
         name="list_reminders",
+        summary="List reminders",
         description="List upcoming (not yet completed) reminders for the user.",
         parameters={
             "type": "object",

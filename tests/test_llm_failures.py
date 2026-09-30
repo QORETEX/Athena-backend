@@ -552,13 +552,17 @@ def test_providers_fail_returns_502(authenticated_client):
     fake_settings = MagicMock()
     fake_settings.any_llm_configured = True
     fake_settings.rate_limit_llm = "1000/minute"
+    fake_settings.max_tool_rounds = 4
 
     mock_llm = MagicMock()
     mock_llm.chat = AsyncMock(return_value=failure_response)
 
     with (
         patch("app.routes.chat.get_settings", return_value=fake_settings),
-        patch("app.routes.chat.get_claude_llm", return_value=mock_llm),
+        patch("app.chat.pipeline.get_claude_llm", return_value=mock_llm),
+        patch("app.chat.pipeline.get_memory_store", return_value=None),
+        patch("app.chat.pipeline.skills_for", return_value=[]),
+        patch("app.chat.pipeline.build_system_prompt", return_value="You are Athena."),
     ):
         resp = authenticated_client.post(
             "/api/chat/text",

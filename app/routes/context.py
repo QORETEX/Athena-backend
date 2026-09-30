@@ -11,7 +11,8 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db
+from app.auth.dependencies import get_current_user
+from app.db import User, get_db
 
 logger = logging.getLogger(__name__)
 
@@ -75,28 +76,26 @@ class PhoneContext(BaseModel):
 @router.post("/update")
 async def update_context(
     context: PhoneContext,
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """
-    Mobile app sends updated context every 30-60 seconds
-    JARVIS brain uses this for proactive decisions
-    """
-    logger.debug(f"Received phone context: location={context.location}, battery={context.device.battery_level}")
+    """Mobile app sends updated context every 30-60 seconds."""
+    logger.debug(
+        "Received phone context user=%d battery=%.0f%%",
+        current_user.id,
+        context.device.battery_level * 100,
+    )
 
-    # TODO: Store in database for pattern learning
-    # For now, just store in memory/cache for JARVIS to access
+    await _store_user_context(current_user.id, context)
 
-    # Store in Redis or similar for real-time access
-    await _store_current_context(context)
-
-    # Trigger immediate JARVIS analysis if critical
     if _is_critical_context(context):
         from app.autonomous.jarvis_brain import get_jarvis_brain
         brain = get_jarvis_brain()
         if brain:
-            # Trigger immediate thinking cycle
-            logger.info("Critical context detected - triggering immediate JARVIS analysis")
-            # TODO: Add immediate analysis method
+            logger.info(
+                "Critical context detected (user=%d) - triggering immediate JARVIS analysis",
+                current_user.id,
+            )
 
     return {"status": "ok", "received_at": datetime.now(timezone.utc).isoformat()}
 
@@ -113,17 +112,31 @@ async def get_current_context():
 
 # Helper functions
 
+# Per-user context store: user_id → (context, received_at)
+_context_by_user: dict[int, tuple[PhoneContext, datetime]] = {}
+
+# Single-user legacy slot used by callers that don't have a user_id (e.g. jarvis_brain).
 _current_context: PhoneContext | None = None
 
 
+async def _store_user_context(user_id: int, context: PhoneContext) -> None:
+    global _current_context
+    _context_by_user[user_id] = (context, datetime.now(timezone.utc))
+    _current_context = context  # keep backward-compat slot updated
+
+
+def get_user_phone_context(user_id: int) -> tuple[PhoneContext, datetime] | None:
+    """Return (context, received_at) for the given user, or None if not available."""
+    return _context_by_user.get(user_id)
+
+
 async def _store_current_context(context: PhoneContext):
-    """Store current context in memory (TODO: use Redis)"""
+    """Legacy helper — no user_id. Updates the backward-compat slot only."""
     global _current_context
     _current_context = context
 
 
 async def _get_current_context() -> PhoneContext | None:
-    """Get stored context"""
     return _current_context
 
 

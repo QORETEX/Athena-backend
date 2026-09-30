@@ -246,10 +246,11 @@ async def handle_daily_briefing() -> dict:
 register_skill(
     Skill(
         name="daily_briefing",
+        summary="Today's briefing: weather and reminders",
         description=(
-            "Generate and deliver a daily briefing covering weather, reminders, "
-            "smart home status, and system health. Use when the user asks for a "
-            "briefing, status update, or 'what's going on today'."
+            "Generate a daily briefing with today's weather, upcoming reminders, "
+            "and pending background tasks. "
+            "Use when the user asks for a briefing, status update, or 'what's going on today'."
         ),
         parameters={
             "type": "object",

@@ -181,6 +181,7 @@ async def handle_register_face(name: str, image_base64: str) -> dict:
 register_skill(
     Skill(
         name="vision",
+        summary="Analyze an image",
         description="Analyze an image: identify faces, detect objects, or read text (OCR). Send a base64-encoded image and specify the task.",
         parameters={
             "type": "object",
@@ -211,6 +212,7 @@ register_skill(
 register_skill(
     Skill(
         name="register_face",
+        summary="Register a face",
         description="Register a new face so it can be identified later. Provide the person's name and a clear photo of their face.",
         parameters={
             "type": "object",

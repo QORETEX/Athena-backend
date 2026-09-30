@@ -48,7 +48,23 @@ from main import app
 # Disable SlowAPI rate limiting in tests.
 limiter._enabled = False
 
+# Register all skill modules once at collection time (the lifespan does not run
+# during tests, so skills would otherwise be absent from the registry).
+from app.skills.registry import register_all_skills as _register_all_skills
+_register_all_skills()
+
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def ensure_skills_registered():
+    """Guarantee skills are registered before any test runs.
+
+    The lifespan does not execute in test mode, so this fixture is the canonical
+    place that mirrors the startup call. The parity tests depend on this.
+    """
+    from app.skills.registry import register_all_skills
+    register_all_skills()
 
 
 @pytest_asyncio.fixture(scope="function")

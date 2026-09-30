@@ -63,6 +63,7 @@ async def handle_delete_note(note_id: int) -> dict:
 register_skill(
     Skill(
         name="save_note",
+        summary="Save a note",
         description="Save a note for the user. Use this when the user asks to remember something, take a note, or jot something down.",
         parameters={
             "type": "object",
@@ -86,6 +87,7 @@ register_skill(
 register_skill(
     Skill(
         name="search_notes",
+        summary="Search saved notes",
         description="Search the user's saved notes by keyword.",
         parameters={
             "type": "object",
@@ -104,6 +106,7 @@ register_skill(
 register_skill(
     Skill(
         name="delete_note",
+        summary="Delete a note",
         description="Delete a specific note by its ID.",
         parameters={
             "type": "object",

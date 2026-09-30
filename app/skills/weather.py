@@ -87,6 +87,7 @@ async def handle_weather(
 register_skill(
     Skill(
         name="get_weather",
+        summary="Get weather forecast",
         description="Get current weather and forecast for a location. Can accept a city name, or latitude/longitude coordinates.",
         parameters={
             "type": "object",

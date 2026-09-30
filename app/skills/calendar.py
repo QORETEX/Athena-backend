@@ -5,6 +5,7 @@ _ISO_OFFSET_NOTE = "ISO 8601 datetime with UTC offset, e.g. 2026-09-30T07:00:00+
 register_skill(
     Skill(
         name="create_calendar_event",
+        summary="Create a calendar event",
         description="Create a new event on the user's device calendar. Confirm details with the user before creating.",
         parameters={
             "type": "object",
@@ -41,6 +42,7 @@ register_skill(
 register_skill(
     Skill(
         name="list_calendar_events",
+        summary="List upcoming calendar events",
         description="List upcoming events from the user's device calendar.",
         parameters={
             "type": "object",

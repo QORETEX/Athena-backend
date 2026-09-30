@@ -57,7 +57,13 @@ async def lifespan(app: FastAPI):
 
     start_scheduler()
 
-    import app.skills.registry  # noqa: F401
+    from app.skills.registry import register_all_skills
+    register_all_skills()
+
+    from app.availability import shutdown as shutdown_availability
+    from app.availability import startup_probe
+
+    await startup_probe()
 
     from app.routines.engine import load_routines
 
@@ -92,6 +98,7 @@ async def lifespan(app: FastAPI):
     await stop_jarvis_brain()
     await stop_monitor()
     await stop_task_worker()
+    shutdown_availability()
     shutdown_scheduler()
     logger.info("Athena backend shut down")
 

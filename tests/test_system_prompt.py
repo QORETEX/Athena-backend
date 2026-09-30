@@ -69,44 +69,65 @@ def test_build_system_prompt_not_cached():
 # ── build_system_prompt — capabilities ────────────────────────────────────────
 
 
-def _make_tool(name: str) -> dict:
-    return {"type": "function", "function": {"name": name, "description": "", "parameters": {}}}
+# Descriptions used in helper tools — must match what the real skills expose
+# so that capability assertions check the right concepts.
+_SKILL_DESCS: dict[str, str] = {
+    "set_reminder": "Set a reminder for a specific date and time.",
+    "list_reminders": "List upcoming reminders.",
+    "get_weather": "Get current weather and forecast for a location.",
+    "save_note": "Save a note for the user.",
+    "search_notes": "Search the user's saved notes by keyword.",
+    "delete_note": "Delete a specific note by ID.",
+    "control_smart_device": "Control a smart home device via Home Assistant.",
+    "web_search": "Search the web for current information using SearXNG.",
+    "generate_image": "Generate an image from a text description.",
+    "list_calendar_events": "List upcoming events from the user's device calendar.",
+    "create_calendar_event": "Create a new event on the user's device calendar.",
+    "daily_briefing": "Generate and deliver a daily briefing.",
+    "background_research": "Submit a research task to run in the background.",
+}
+
+
+def _make_tool(name: str, desc: str | None = None) -> dict:
+    description = desc if desc is not None else _SKILL_DESCS.get(name, f"Use {name}.")
+    return {"type": "function", "function": {"name": name, "description": description, "parameters": {}}}
 
 
 def _extract_capabilities(prompt: str) -> str:
-    """Return the fragment of the prompt that lists capabilities (empty string if absent)."""
-    marker = "capabilities through your tools:"
+    """Return the full capabilities block (empty string if absent)."""
+    marker = "Capabilities available this session:\n"
     if marker not in prompt:
         return ""
-    # Take the text from the marker to the end of that sentence.
     after = prompt.split(marker, 1)[1]
-    return after.split(".")[0]
+    # Block ends at blank line
+    end = after.find("\n\n")
+    return after[:end] if end >= 0 else after
 
 
 def test_capabilities_from_available_tools():
-    """Capabilities sentence must reflect only the tools in available_tools."""
+    """Capabilities block must reflect only the tools in available_tools."""
     tools = [_make_tool("set_reminder"), _make_tool("get_weather")]
     prompt = build_system_prompt(available_tools=tools)
     cap = _extract_capabilities(prompt)
-    assert cap, "capabilities sentence missing"
-    assert "reminders" in cap
+    assert cap, "capabilities block missing"
+    assert "reminder" in cap
     assert "weather" in cap
-    # These are not in the tool list — must not appear in the capabilities sentence
+    # These are not in the tool list — must not appear in the capabilities block
     assert "smart home" not in cap
-    assert "web search" not in cap
-    assert "image generation" not in cap
+    assert "SearXNG" not in cap
+    assert "image" not in cap
 
 
 def test_capabilities_omits_disabled_features():
-    """Smart home, web search, and image gen must not appear in the capabilities sentence."""
+    """Smart home, web search, and image gen must not appear in the capabilities block."""
     tools = [_make_tool("save_note"), _make_tool("set_reminder")]
     prompt = build_system_prompt(available_tools=tools)
     cap = _extract_capabilities(prompt)
     assert "smart home" not in cap
-    assert "web search" not in cap
-    assert "image generation" not in cap
-    assert "notes" in cap
-    assert "reminders" in cap
+    assert "SearXNG" not in cap
+    assert "image" not in cap
+    assert "note" in cap
+    assert "reminder" in cap
 
 
 def test_capabilities_empty_tool_list():

@@ -120,6 +120,18 @@ class Settings(BaseSettings):
     # Each provider gets min(llm_read_timeout, remaining_budget) for its read phase.
     # Providers are skipped once the budget is spent.
     llm_chain_deadline: int = 40
+    # Maximum number of tool-calling rounds before forcing a text-only reply.
+    max_tool_rounds: int = 4
+
+    # ── STT / TTS timeouts ───────────────────────────────────────
+    # Max seconds for Whisper transcription (CPU-bound; longer audio takes longer).
+    stt_timeout: int = 30
+    # Max seconds for Piper TTS synthesis.
+    tts_timeout: int = 30
+
+    # ── Device context ───────────────────────────────────────────
+    # Context older than this (seconds) is flagged stale.
+    device_context_max_age_seconds: int = 900
 
     # ── CORS ─────────────────────────────────────────────────────
     cors_origins: str = ""

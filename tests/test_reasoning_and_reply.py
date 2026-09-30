@@ -135,9 +135,9 @@ async def test_groq_real_content_still_returned():
 
 
 @pytest.mark.asyncio
-async def test_empty_reply_after_tool_loop_triggers_followup_call():
-    """Path 1: post-tool call returns empty content → 3rd call provides the reply."""
-    from app.routes.chat import _run_chat_pipeline
+async def test_empty_reply_after_tool_loop_uses_summary():
+    """Post-tool round returns empty content → summary used immediately (2 LLM calls total)."""
+    from app.chat.pipeline import run_chat_turn
 
     call_count = 0
     tool_result = {"success": True, "reminder_id": 1, "remind_at": "2026-09-30T07:00:00+00:00"}
@@ -152,42 +152,39 @@ async def test_empty_reply_after_tool_loop_triggers_followup_call():
                     "text": "test this", "time": "2026-09-30T07:00:00+00:00",
                 }},
             }]}}
-        elif call_count == 2:
-            # Post-tool response: empty content
-            return {"message": {"role": "assistant", "content": ""}}
         else:
-            # Follow-up call: provides the reply
-            return {"message": {"role": "assistant", "content": "Reminder set for Wed 30 Sep, 07:00."}}
+            # Post-tool response: empty content — bounded loop uses summary directly
+            return {"message": {"role": "assistant", "content": ""}}
 
     mock_llm = MagicMock()
     mock_llm.chat = mock_chat
 
     mock_skill = MagicMock()
     mock_skill.client_executed = False
-    mock_skill.handler = AsyncMock(return_value=tool_result)
-    mock_skill.timeout = 30.0
     mock_skill.returns_external_content = False
 
     with (
-        patch("app.routes.chat.get_claude_llm", return_value=mock_llm),
-        patch("app.routes.chat.get_memory_store", return_value=None),
-        patch("app.routes.chat.get_server_tools", return_value=[]),
-        patch("app.routes.chat.get_skill", return_value=mock_skill),
-        patch("app.routes.chat.build_system_prompt", return_value="You are Athena."),
+        patch("app.chat.pipeline.get_claude_llm", return_value=mock_llm),
+        patch("app.chat.pipeline.get_memory_store", return_value=None),
+        patch("app.chat.pipeline.skills_for", return_value=[]),
+        patch("app.chat.pipeline.get_skill", return_value=mock_skill),
+        patch("app.chat.pipeline.build_system_prompt", return_value="You are Athena."),
+        patch("app.chat.pipeline.call_skill_handler", new=AsyncMock(return_value=tool_result)),
     ):
-        reply, tool_calls, tool_results, error = await _run_chat_pipeline(
+        result = await run_chat_turn(
             "Remind me to test this tomorrow at 7am", []
         )
 
-    assert call_count == 3, f"Expected 3 LLM calls, got {call_count}"
-    assert reply == "Reminder set for Wed 30 Sep, 07:00."
-    assert error is None
+    assert call_count == 2, f"Expected 2 LLM calls, got {call_count}"
+    assert "Reminder set for" in result.reply
+    assert "Wed" in result.reply
+    assert result.error is None
 
 
 @pytest.mark.asyncio
-async def test_empty_reply_fallback_summary_when_followup_also_empty():
-    """Path 2: both post-tool and follow-up return empty → summary from tool results."""
-    from app.routes.chat import _run_chat_pipeline
+async def test_empty_reply_fallback_summary_when_post_tool_empty():
+    """Post-tool round returns empty → summary from tool results (2 LLM calls, not 3)."""
+    from app.chat.pipeline import run_chat_turn
 
     call_count = 0
     tool_result = {"success": True, "reminder_id": 2, "remind_at": "2026-10-02T09:00:00+00:00"}
@@ -203,7 +200,6 @@ async def test_empty_reply_fallback_summary_when_followup_also_empty():
                 }},
             }]}}
         else:
-            # Both second and third calls return empty content
             return {"message": {"role": "assistant", "content": ""}}
 
     mock_llm = MagicMock()
@@ -211,26 +207,25 @@ async def test_empty_reply_fallback_summary_when_followup_also_empty():
 
     mock_skill = MagicMock()
     mock_skill.client_executed = False
-    mock_skill.handler = AsyncMock(return_value=tool_result)
-    mock_skill.timeout = 30.0
     mock_skill.returns_external_content = False
 
     with (
-        patch("app.routes.chat.get_claude_llm", return_value=mock_llm),
-        patch("app.routes.chat.get_memory_store", return_value=None),
-        patch("app.routes.chat.get_server_tools", return_value=[]),
-        patch("app.routes.chat.get_skill", return_value=mock_skill),
-        patch("app.routes.chat.build_system_prompt", return_value="You are Athena."),
+        patch("app.chat.pipeline.get_claude_llm", return_value=mock_llm),
+        patch("app.chat.pipeline.get_memory_store", return_value=None),
+        patch("app.chat.pipeline.skills_for", return_value=[]),
+        patch("app.chat.pipeline.get_skill", return_value=mock_skill),
+        patch("app.chat.pipeline.build_system_prompt", return_value="You are Athena."),
+        patch("app.chat.pipeline.call_skill_handler", new=AsyncMock(return_value=tool_result)),
     ):
-        reply, tool_calls, tool_results, error = await _run_chat_pipeline(
+        result = await run_chat_turn(
             "Remind me on Friday at 9am to submit my assignment", []
         )
 
-    assert call_count == 3, f"Expected 3 LLM calls, got {call_count}"
+    assert call_count == 2, f"Expected 2 LLM calls, got {call_count}"
     # Summary fallback must mention the reminder was set and include the date
-    assert "Reminder set for" in reply
-    assert "Fri" in reply
-    assert error is None
+    assert "Reminder set for" in result.reply
+    assert "Fri" in result.reply
+    assert result.error is None
 
 
 # ── _summarize_tool_results unit tests ────────────────────────────────────────
@@ -238,7 +233,7 @@ async def test_empty_reply_fallback_summary_when_followup_also_empty():
 
 def test_summarize_reminder_result():
     """set_reminder success produces a human-readable date string."""
-    from app.routes.chat import _summarize_tool_results
+    from app.chat.pipeline import _summarize_tool_results
 
     results = [{"tool": "set_reminder", "result": {
         "success": True, "reminder_id": 1, "remind_at": "2026-09-30T07:00:00+00:00",
@@ -252,7 +247,7 @@ def test_summarize_reminder_result():
 
 def test_summarize_error_result():
     """A tool result with error must include the error text."""
-    from app.routes.chat import _summarize_tool_results
+    from app.chat.pipeline import _summarize_tool_results
 
     results = [{"tool": "set_reminder", "result": {
         "success": False, "error": "time must be ISO 8601 with UTC offset",
@@ -263,5 +258,5 @@ def test_summarize_error_result():
 
 def test_summarize_empty_results():
     """Empty tool_results list returns 'Done.'"""
-    from app.routes.chat import _summarize_tool_results
+    from app.chat.pipeline import _summarize_tool_results
     assert _summarize_tool_results([]) == "Done."

@@ -184,7 +184,8 @@ async def handle_image_gen(
 register_skill(
     Skill(
         name="generate_image",
-        description="Generate an image from a text description. Uses Gemini or Stable Diffusion.",
+        summary="Generate an image",
+        description="Generate an image from a text description.",
         parameters={
             "type": "object",
             "properties": {
