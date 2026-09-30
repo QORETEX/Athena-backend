@@ -144,6 +144,11 @@ def test_register_all_skills_names_match_startup():
         "get_device_context",
         "generate_image",
         "search_knowledge",
+        "list_skills",
+        "remember_fact",
+        "forget_fact",
+        "forget_all_facts",
+        "list_facts",
         "save_note",
         "search_notes",
         "delete_note",
@@ -370,3 +375,104 @@ def test_api_skills_available_param_false_includes_all(authenticated_client):
     assert resp_all.status_code == 200
     assert resp_avail.status_code == 200
     assert len(resp_all.json()) >= len(resp_avail.json())
+
+
+# ── list_skills: client_capabilities context ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_skills_http_excludes_client_executed():
+    """list_skills called in HTTP context must not include client-executed skills."""
+    from app.chat.pipeline import _client_capabilities
+    from app.skills.list_skills import handle_list_skills
+    from app.skills.registry import register_all_skills
+
+    register_all_skills()
+    token = _client_capabilities.set(False)
+    try:
+        result = await handle_list_skills()
+    finally:
+        _client_capabilities.reset(token)
+
+    names = {s["name"] for s in result["skills"]}
+    assert "device_control" not in names, "device_control must be absent on HTTP path"
+    assert "create_calendar_event" not in names
+    assert "list_calendar_events" not in names
+    # The skill must not list itself
+    assert "list_skills" not in names
+
+
+@pytest.mark.asyncio
+async def test_list_skills_ws_includes_client_executed():
+    """list_skills called in WS context must include client-executed skills."""
+    from app.chat.pipeline import _client_capabilities
+    from app.skills.list_skills import handle_list_skills
+    from app.skills.registry import register_all_skills
+
+    register_all_skills()
+    token = _client_capabilities.set(True)
+    try:
+        result = await handle_list_skills()
+    finally:
+        _client_capabilities.reset(token)
+
+    names = {s["name"] for s in result["skills"]}
+    assert "device_control" in names, "device_control must be present on WS path"
+    assert "create_calendar_event" in names
+    # Still must not list itself
+    assert "list_skills" not in names
+
+
+@pytest.mark.asyncio
+async def test_list_skills_matches_api_skills_http(authenticated_client):
+    """list_skills result (HTTP context) must equal GET /api/skills?available=true names minus list_skills."""
+    from app.chat.pipeline import _client_capabilities
+    from app.skills.list_skills import handle_list_skills
+    from app.skills.registry import register_all_skills
+
+    register_all_skills()
+
+    api_resp = authenticated_client.get("/api/skills/?available=true&client_capabilities=false")
+    assert api_resp.status_code == 200
+    # API includes list_skills itself; handler filters it out, so exclude it for comparison.
+    api_names = {s["name"] for s in api_resp.json()} - {"list_skills"}
+
+    token = _client_capabilities.set(False)
+    try:
+        result = await handle_list_skills()
+    finally:
+        _client_capabilities.reset(token)
+    handler_names = {s["name"] for s in result["skills"]}
+
+    assert handler_names == api_names, (
+        f"list_skills handler and GET /api/skills disagree (HTTP context).\n"
+        f"Handler only: {sorted(handler_names - api_names)}\n"
+        f"API only: {sorted(api_names - handler_names)}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_skills_ws_matches_api_skills_client_caps(authenticated_client):
+    """list_skills result (WS context) must equal GET /api/skills?available=true&client_capabilities=true names minus list_skills."""
+    from app.chat.pipeline import _client_capabilities
+    from app.skills.list_skills import handle_list_skills
+    from app.skills.registry import register_all_skills
+
+    register_all_skills()
+
+    api_resp = authenticated_client.get("/api/skills/?available=true&client_capabilities=true")
+    assert api_resp.status_code == 200
+    api_names = {s["name"] for s in api_resp.json()} - {"list_skills"}
+
+    token = _client_capabilities.set(True)
+    try:
+        result = await handle_list_skills()
+    finally:
+        _client_capabilities.reset(token)
+    handler_names = {s["name"] for s in result["skills"]}
+
+    assert handler_names == api_names, (
+        f"list_skills handler and GET /api/skills disagree (WS/client_capabilities context).\n"
+        f"Handler only: {sorted(handler_names - api_names)}\n"
+        f"API only: {sorted(api_names - handler_names)}"
+    )

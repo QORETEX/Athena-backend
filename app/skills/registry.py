@@ -24,6 +24,8 @@ def register_all_skills() -> None:
         device_control,
         image_gen,
         knowledge_search,
+        list_skills,
+        memory_facts,
         notes,
         reminders,
         smart_home,

@@ -50,6 +50,7 @@ def _user_dict(user: User) -> dict:
         "id": user.id,
         "email": user.email,
         "name": user.name,
+        "preferred_name": user.preferred_name,
         "avatar_url": user.avatar_url,
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "last_login": user.last_login.isoformat() if user.last_login else None,

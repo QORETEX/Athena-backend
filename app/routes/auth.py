@@ -42,11 +42,16 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class UpdateMeRequest(BaseModel):
+    preferred_name: str | None = None
+
+
 def _user_dict(user: User) -> dict:
     return {
         "id": user.id,
         "email": user.email,
         "name": user.name,
+        "preferred_name": user.preferred_name,
         "avatar_url": user.avatar_url,
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "last_login": user.last_login.isoformat() if user.last_login else None,
@@ -278,6 +283,20 @@ async def refresh_token(
 @protected_router.get("/me")
 async def get_me(current_user: User = Depends(get_current_user)):
     """Return the authenticated user's profile."""
+    return _user_dict(current_user)
+
+
+@protected_router.patch("/me")
+async def update_me(
+    body: UpdateMeRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update editable profile fields for the authenticated user."""
+    if body.preferred_name is not None:
+        stripped = body.preferred_name.strip()
+        current_user.preferred_name = stripped if stripped else None
+    await db.flush()
     return _user_dict(current_user)
 
 

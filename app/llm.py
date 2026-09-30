@@ -77,6 +77,9 @@ def build_system_prompt(
     available_tools: list[dict] | None = None,
     available_skills: list | None = None,
     memory_available: bool = False,
+    user_name: str | None = None,
+    user_facts: list[dict] | None = None,
+    facts_available: bool = False,
     _now: datetime | None = None,
 ) -> str:
     """Build the per-request system prompt.
@@ -114,11 +117,11 @@ def build_system_prompt(
     else:
         greeting_period = "night"
 
-    user_name = ""
+    _pref_name = ""
     user_location = ""
     user_tz = ""
     if user_prefs:
-        user_name = user_prefs.get("preferred_name", "")
+        _pref_name = user_prefs.get("preferred_name", "")
         user_location = user_prefs.get("location", "")
         user_tz = user_prefs.get("timezone", "")
 
@@ -208,8 +211,21 @@ def build_system_prompt(
         "act on it directly. Only ask for clarification when a required detail is genuinely absent.\n"
     )
 
-    if user_name:
-        prompt += f"\nYou are speaking with {user_name}. Address them naturally.\n"
+    # Resolve display name: direct param takes priority over user_prefs dict.
+    effective_name = user_name or _pref_name
+
+    if effective_name or user_facts:
+        block = "\nAbout this user"
+        if effective_name:
+            block += f": {effective_name}"
+        block += "\n"
+        if user_facts:
+            for fact in user_facts[:40]:
+                line = f"- {fact['key']}: {fact['value']}"
+                if fact.get("category"):
+                    line += f" ({fact['category']})"
+                block += line + "\n"
+        prompt += block
 
     if memory_context:
         prompt += "\nContext from past interactions:\n"
@@ -220,7 +236,13 @@ def build_system_prompt(
             "'I remember' unless the user asks about past conversations.\n"
         )
 
-    if not memory_available:
+    if facts_available:
+        prompt += (
+            "\nMemory: facts stored with remember_fact persist across conversations. "
+            "After it succeeds, confirm briefly: \"Noted, I'll remember that.\" "
+            "Never promise to remember something before the tool call completes.\n"
+        )
+    elif not memory_available:
         prompt += (
             "\nNote: Long-term memory is not available in this session. "
             "Do not promise to remember things beyond this conversation.\n"

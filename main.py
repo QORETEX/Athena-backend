@@ -162,6 +162,7 @@ from app.routes.knowledge import router as knowledge_router
 from app.routes.learning import router as learning_router
 from app.routes.memory import router as memory_router
 from app.routes.memory_enhanced import router as memory_enhanced_router
+from app.routes.memory_facts import router as memory_facts_router
 from app.routes.notes import router as notes_router
 from app.routes.notifications import router as notifications_router
 from app.routes.patterns import router as patterns_router
@@ -216,6 +217,7 @@ app.include_router(weather_router, dependencies=_auth)
 app.include_router(search_router, dependencies=_auth)
 app.include_router(knowledge_router, dependencies=_auth)
 app.include_router(memory_router, dependencies=_auth)
+app.include_router(memory_facts_router, dependencies=_auth)
 app.include_router(smart_home_router, dependencies=_auth)
 app.include_router(vision_router, dependencies=_auth)
 app.include_router(conversations_router, dependencies=_auth)

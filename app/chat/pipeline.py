@@ -27,8 +27,10 @@ from app.skills.base import (
 
 logger = logging.getLogger(__name__)
 
-# Current authenticated user for this chat turn — used by skills that need per-user data.
+# Per-turn context vars — readable by skill handlers via deferred import.
 _current_user_id: ContextVar[int | None] = ContextVar("_current_user_id", default=None)
+# True when the caller is the WS voice path (client_executed skills available).
+_client_capabilities: ContextVar[bool] = ContextVar("_client_capabilities", default=False)
 
 
 def _skills_to_tool_list(skill_infos: list[SkillInfo]) -> list[dict]:
@@ -136,6 +138,7 @@ async def run_chat_turn(
         skills return a structured error instead.
     """
     _uid_token = _current_user_id.set(user_id)
+    _cap_token = _client_capabilities.set(client_capabilities)
     try:
         return await _run_chat_turn_inner(
             user_text, history, client_capabilities,
@@ -143,6 +146,42 @@ async def run_chat_turn(
         )
     finally:
         _current_user_id.reset(_uid_token)
+        _client_capabilities.reset(_cap_token)
+
+
+async def _load_user_context(user_id: int) -> tuple[str | None, list[dict]]:
+    """Load display name and remembered facts for the given user.
+
+    Uses the module-level async_session so it picks up test patches on app.db.async_session.
+    Returns (display_name, facts) on success; (None, []) on any error.
+    """
+    try:
+        import app.db as _appdb
+        from sqlalchemy import select as _select
+
+        async with _appdb.async_session() as session:
+            user = await session.get(_appdb.User, user_id)
+            display_name: str | None = None
+            if user:
+                pname = getattr(user, "preferred_name", None)
+                display_name = (pname if isinstance(pname, str) and pname else None) or (
+                    user.name if isinstance(user.name, str) and user.name else None
+                )
+
+            result = await session.execute(
+                _select(_appdb.UserKnowledge)
+                .where(_appdb.UserKnowledge.user_id == user_id)
+                .order_by(_appdb.UserKnowledge.updated_at.desc())
+                .limit(40)
+            )
+            facts = result.scalars().all()
+            return display_name, [
+                {"key": f.key, "value": f.value, "category": f.category}
+                for f in facts
+            ]
+    except Exception:
+        logger.debug("Failed to load user context for user_id=%s", user_id, exc_info=True)
+        return None, []
 
 
 async def _run_chat_turn_inner(
@@ -160,6 +199,13 @@ async def _run_chat_turn_inner(
         if results:
             memory_context = results
 
+    # Load user's display name and remembered facts for the "About this user" block.
+    user_id = _current_user_id.get()
+    user_name: str | None = None
+    user_facts: list[dict] = []
+    if user_id:
+        user_name, user_facts = await _load_user_context(user_id)
+
     # Single source of truth: skills_for() drives both the tool list and the
     # capabilities section of the system prompt.
     all_skill_infos = skills_for(client_capabilities=client_capabilities)
@@ -170,6 +216,9 @@ async def _run_chat_turn_inner(
         memory_context,
         available_skills=available_skill_infos,
         memory_available=memory_store is not None and memory_store.available,
+        user_name=user_name,
+        user_facts=user_facts if user_id else None,
+        facts_available=user_id is not None,
     )
 
     messages = [{"role": "system", "content": system_prompt}]
