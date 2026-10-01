@@ -20,14 +20,14 @@ SECURITY_INSTRUCTION = (
 
 
 
-def _format_current_time(_now: datetime | None = None) -> str:
+def _format_current_time(_now: datetime | None = None, timezone_name: str | None = None) -> str:
     """Return the current time formatted as 'Weekday D Month YYYY, HH:MM (TZ, UTC±HH:MM)'.
 
     Accepts an optional frozen datetime for testing (must be timezone-aware).
     When None, reads the real current time in the configured DEFAULT_TIMEZONE.
     """
     settings = get_settings()
-    tz_name = settings.default_timezone
+    tz_name = timezone_name or settings.default_timezone
 
     try:
         from zoneinfo import ZoneInfo
@@ -47,14 +47,23 @@ def _format_current_time(_now: datetime | None = None) -> str:
     return f"{now.strftime('%A')} {now.day} {now.strftime('%B %Y, %H:%M')} ({tz_name}, {utc_str})"
 
 
-def _format_14_day_calendar(_now: datetime | None = None) -> str:
+def _user_zone(user_timezone: str | None):
+    from zoneinfo import ZoneInfo
+    try:
+        name = user_timezone or get_settings().default_timezone
+        return ZoneInfo(name), name
+    except Exception:
+        return timezone.utc, "UTC"
+
+
+def _format_14_day_calendar(_now: datetime | None = None, timezone_name: str | None = None) -> str:
     """Return a compact comma-separated list of the next 14 days (today inclusive).
 
     Format: 'Tue 29 Sep, Wed 30 Sep, Thu 1 Oct, ...'
     Accepts an optional frozen datetime for testing (must be timezone-aware).
     """
     settings = get_settings()
-    tz_name = settings.default_timezone
+    tz_name = timezone_name or settings.default_timezone
 
     try:
         from zoneinfo import ZoneInfo
@@ -80,6 +89,7 @@ def build_system_prompt(
     user_name: str | None = None,
     user_facts: list[dict] | None = None,
     facts_available: bool = False,
+    user_timezone: str | None = None,
     _now: datetime | None = None,
 ) -> str:
     """Build the per-request system prompt.
@@ -103,10 +113,11 @@ def build_system_prompt(
     _now:
         Frozen datetime for testing only.  Must be timezone-aware.
     """
-    time_str = _format_current_time(_now)
-    calendar_str = _format_14_day_calendar(_now)
-    now_utc = _now.astimezone(timezone.utc) if _now is not None else datetime.now(timezone.utc)
-    hour = now_utc.hour
+    tz, tz_name = _user_zone(user_timezone)
+    local_now = _now.astimezone(tz) if _now is not None else datetime.now(tz)
+    time_str = _format_current_time(local_now, tz_name)
+    calendar_str = _format_14_day_calendar(local_now, tz_name)
+    hour = local_now.hour
 
     if 5 <= hour < 12:
         greeting_period = "morning"
@@ -119,7 +130,7 @@ def build_system_prompt(
 
     _pref_name = ""
     user_location = ""
-    user_tz = ""
+    user_tz = user_timezone or ""
     if user_prefs:
         _pref_name = user_prefs.get("preferred_name", "")
         user_location = user_prefs.get("location", "")

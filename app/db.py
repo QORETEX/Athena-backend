@@ -6,7 +6,7 @@ from typing import Optional
 
 from sqlalchemy import (
     Boolean, DateTime, Float, ForeignKey, Index, Integer,
-    String, Text, UniqueConstraint, event,
+    String, Text, UniqueConstraint, event, select,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -18,7 +18,13 @@ class Base(DeclarativeBase):
     pass
 
 
-class Reminder(Base):
+class UserOwned:
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+
+class Reminder(UserOwned, Base):
     __tablename__ = "reminders"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -30,7 +36,7 @@ class Reminder(Base):
     )
 
 
-class Note(Base):
+class Note(UserOwned, Base):
     __tablename__ = "notes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -42,7 +48,7 @@ class Note(Base):
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class ConversationLog(Base):
+class ConversationLog(UserOwned, Base):
     __tablename__ = "conversation_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -54,7 +60,7 @@ class ConversationLog(Base):
     tool_calls: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
-class SmartHomeDevice(Base):
+class SmartHomeDevice(UserOwned, Base):
     __tablename__ = "smart_home_devices"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -77,6 +83,7 @@ class User(Base):
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     preferred_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC", server_default="UTC")
     avatar_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     password_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -122,18 +129,20 @@ class RefreshToken(Base):
     user_agent: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
 
-class UserPreference(Base):
+class UserPreference(UserOwned, Base):
     __tablename__ = "user_preferences"
 
+    __table_args__ = (UniqueConstraint("user_id", "key", name="uq_user_preferences_user_key"),)
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    key: Mapped[str] = mapped_column(String(100), nullable=False)
     value: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
 
-class Routine(Base):
+class Routine(UserOwned, Base):
     __tablename__ = "routines"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -149,7 +158,7 @@ class Routine(Base):
     )
 
 
-class BackgroundTask(Base):
+class BackgroundTask(UserOwned, Base):
     __tablename__ = "background_tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -164,7 +173,7 @@ class BackgroundTask(Base):
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class NotificationLog(Base):
+class NotificationLog(UserOwned, Base):
     __tablename__ = "notification_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -179,7 +188,7 @@ class NotificationLog(Base):
     )
 
 
-class PushToken(Base):
+class PushToken(UserOwned, Base):
     __tablename__ = "push_tokens"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -195,7 +204,7 @@ class PushToken(Base):
     )
 
 
-class Email(Base):
+class Email(UserOwned, Base):
     __tablename__ = "emails"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -213,7 +222,7 @@ class Email(Base):
     )
 
 
-class Meeting(Base):
+class Meeting(UserOwned, Base):
     __tablename__ = "meetings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -232,7 +241,7 @@ class Meeting(Base):
     )
 
 
-class JournalEntry(Base):
+class JournalEntry(UserOwned, Base):
     __tablename__ = "journal_entries"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -247,7 +256,7 @@ class JournalEntry(Base):
     )
 
 
-class Expense(Base):
+class Expense(UserOwned, Base):
     __tablename__ = "expenses"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -263,7 +272,7 @@ class Expense(Base):
     )
 
 
-class Package(Base):
+class Package(UserOwned, Base):
     __tablename__ = "packages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -279,7 +288,7 @@ class Package(Base):
     )
 
 
-class UserPattern(Base):
+class UserPattern(UserOwned, Base):
     __tablename__ = "user_patterns"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -296,7 +305,7 @@ class UserPattern(Base):
     )
 
 
-class LongTermMemory(Base):
+class LongTermMemory(UserOwned, Base):
     __tablename__ = "long_term_memory"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -312,7 +321,7 @@ class LongTermMemory(Base):
     )
 
 
-class AutomationRule(Base):
+class AutomationRule(UserOwned, Base):
     __tablename__ = "automation_rules"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -330,7 +339,7 @@ class AutomationRule(Base):
     )
 
 
-class Contact(Base):
+class Contact(UserOwned, Base):
     __tablename__ = "contacts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -353,7 +362,7 @@ class Contact(Base):
     )
 
 
-class ContactInteraction(Base):
+class ContactInteraction(UserOwned, Base):
     __tablename__ = "contact_interactions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -368,7 +377,7 @@ class ContactInteraction(Base):
     )
 
 
-class FocusSession(Base):
+class FocusSession(UserOwned, Base):
     __tablename__ = "focus_sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -388,11 +397,13 @@ class FocusSession(Base):
     )
 
 
-class QuickAction(Base):
+class QuickAction(UserOwned, Base):
     __tablename__ = "quick_actions"
 
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_quick_actions_user_name"),)
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
     trigger_phrase: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     actions: Mapped[str] = mapped_column(Text, nullable=False)
@@ -410,9 +421,8 @@ class UserKnowledge(Base):
     __tablename__ = "user_knowledge"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    # user_id scopes facts to a specific user; NULL = legacy global fact
-    user_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     category: Mapped[str] = mapped_column(String(50), nullable=False)
     key: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -430,6 +440,17 @@ class UserKnowledge(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+
+
+def scoped(model, user_id: int):
+    return select(model).where(model.user_id == user_id)
+
+
+async def get_owned_or_none(session: AsyncSession, model, row_id: int, user_id: int):
+    result = await session.execute(
+        select(model).where(model.id == row_id, model.user_id == user_id)
+    )
+    return result.scalar_one_or_none()
 
 
 def _set_wal_mode(dbapi_conn, connection_record):

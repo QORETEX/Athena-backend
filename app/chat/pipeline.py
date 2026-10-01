@@ -33,6 +33,13 @@ _current_user_id: ContextVar[int | None] = ContextVar("_current_user_id", defaul
 _client_capabilities: ContextVar[bool] = ContextVar("_client_capabilities", default=False)
 
 
+def current_user_id() -> int:
+    user_id = _current_user_id.get()
+    if user_id is None:
+        raise RuntimeError("No authenticated user in skill context")
+    return user_id
+
+
 def _skills_to_tool_list(skill_infos: list[SkillInfo]) -> list[dict]:
     return [
         {
@@ -184,6 +191,16 @@ async def _load_user_context(user_id: int) -> tuple[str | None, list[dict]]:
         return None, []
 
 
+async def _load_user_timezone(user_id: int) -> str:
+    try:
+        import app.db as _appdb
+        async with _appdb.async_session() as session:
+            user = await session.get(_appdb.User, user_id)
+            return user.timezone if user else "UTC"
+    except Exception:
+        return "UTC"
+
+
 async def _run_chat_turn_inner(
     user_text: str,
     history: list[dict],
@@ -202,9 +219,11 @@ async def _run_chat_turn_inner(
     # Load user's display name and remembered facts for the "About this user" block.
     user_id = _current_user_id.get()
     user_name: str | None = None
+    user_timezone = "UTC"
     user_facts: list[dict] = []
     if user_id:
         user_name, user_facts = await _load_user_context(user_id)
+        user_timezone = await _load_user_timezone(user_id)
 
     # Single source of truth: skills_for() drives both the tool list and the
     # capabilities section of the system prompt.
@@ -217,6 +236,7 @@ async def _run_chat_turn_inner(
         available_skills=available_skill_infos,
         memory_available=memory_store is not None and memory_store.available,
         user_name=user_name,
+        user_timezone=user_timezone,
         user_facts=user_facts if user_id else None,
         facts_available=user_id is not None,
     )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from zoneinfo import ZoneInfo
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -36,6 +37,7 @@ protected_router = APIRouter(prefix="/api/auth", tags=["auth"])
 class OAuthRequest(BaseModel):
     id_token: str
     name: str | None = None
+    timezone: str | None = None
 
 
 class RefreshRequest(BaseModel):
@@ -44,6 +46,7 @@ class RefreshRequest(BaseModel):
 
 class UpdateMeRequest(BaseModel):
     preferred_name: str | None = None
+    timezone: str | None = None
 
 
 def _user_dict(user: User) -> dict:
@@ -52,6 +55,7 @@ def _user_dict(user: User) -> dict:
         "email": user.email,
         "name": user.name,
         "preferred_name": user.preferred_name,
+        "timezone": user.timezone,
         "avatar_url": user.avatar_url,
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "last_login": user.last_login.isoformat() if user.last_login else None,
@@ -65,12 +69,18 @@ async def _find_or_create_oauth_user(
     email: str | None,
     name: str | None = None,
     avatar_url: str | None = None,
+    timezone_name: str | None = None,
 ) -> User:
     """Look up user by OAuth identity; create or link as needed.
 
     Raises 409 when the email belongs to an account that has only a password identity.
     """
     now = datetime.now(timezone.utc)
+    if timezone_name is not None:
+        try:
+            ZoneInfo(timezone_name)
+        except Exception:
+            raise HTTPException(status_code=422, detail="Invalid IANA timezone")
 
     stmt = select(UserIdentity).where(
         UserIdentity.provider == provider,
@@ -124,6 +134,7 @@ async def _find_or_create_oauth_user(
         is_active=True,
         created_at=now,
         last_login=now,
+        timezone=timezone_name or "UTC",
     )
     db.add(user)
     await db.flush()
@@ -186,7 +197,10 @@ async def login_google(
         db, "google", info["provider_id"], info.get("email"),
         name=body.name or info.get("name"),
         avatar_url=info.get("avatar_url"),
+        timezone_name=body.timezone,
     )
+    if body.timezone:
+        user.timezone = body.timezone
     return await _issue_tokens(db, user, request.headers.get("user-agent"))
 
 
@@ -210,7 +224,10 @@ async def login_apple(
     user = await _find_or_create_oauth_user(
         db, "apple", info["provider_id"], info.get("email"),
         name=body.name,
+        timezone_name=body.timezone,
     )
+    if body.timezone:
+        user.timezone = body.timezone
     return await _issue_tokens(db, user, request.headers.get("user-agent"))
 
 
@@ -296,6 +313,12 @@ async def update_me(
     if body.preferred_name is not None:
         stripped = body.preferred_name.strip()
         current_user.preferred_name = stripped if stripped else None
+    if body.timezone is not None:
+        try:
+            ZoneInfo(body.timezone)
+        except Exception:
+            raise HTTPException(status_code=422, detail="Invalid IANA timezone")
+        current_user.timezone = body.timezone
     await db.flush()
     return _user_dict(current_user)
 
