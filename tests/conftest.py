@@ -127,6 +127,77 @@ async def async_client(override_get_db) -> AsyncGenerator[AsyncClient, None]:
 
 
 @pytest.fixture
+def user_a(override_get_db) -> dict:
+    """Register user A in the test DB; return {id, email, access_token}."""
+    tc = TestClient(app)
+    resp = tc.post("/api/auth/register", json={
+        "email": "user_a@isolation.test",
+        "password": "passwordA_123",
+        "name": "User A",
+    })
+    assert resp.status_code == 200, f"user_a register failed: {resp.text}"
+    data = resp.json()
+    return {
+        "id": data["user"]["id"],
+        "email": "user_a@isolation.test",
+        "access_token": data["access_token"],
+    }
+
+
+@pytest.fixture
+def user_b(override_get_db) -> dict:
+    """Register user B in the test DB; return {id, email, access_token}."""
+    tc = TestClient(app)
+    resp = tc.post("/api/auth/register", json={
+        "email": "user_b@isolation.test",
+        "password": "passwordB_456",
+        "name": "User B",
+    })
+    assert resp.status_code == 200, f"user_b register failed: {resp.text}"
+    data = resp.json()
+    return {
+        "id": data["user"]["id"],
+        "email": "user_b@isolation.test",
+        "access_token": data["access_token"],
+    }
+
+
+@pytest.fixture
+def client_a(user_a) -> TestClient:
+    """TestClient pre-authenticated as user A."""
+    return TestClient(app, headers={"Authorization": f"Bearer {user_a['access_token']}"})
+
+
+@pytest.fixture
+def client_b(user_b) -> TestClient:
+    """TestClient pre-authenticated as user B."""
+    return TestClient(app, headers={"Authorization": f"Bearer {user_b['access_token']}"})
+
+
+@pytest.fixture
+def skill_runner():
+    """Return an async callable that runs a skill handler coroutine as a given user.
+
+    Sets ``_current_user_id`` in the pipeline ContextVar for the duration of the
+    call so skills can reach ``current_user_id()`` without raising RuntimeError.
+
+    Usage inside an ``@pytest.mark.asyncio`` test::
+
+        result = await skill_runner(handle_set_reminder(text="...", time="..."), user_id=1)
+    """
+    from app.chat.pipeline import _current_user_id
+
+    async def _run(coro, *, user_id: int):
+        token = _current_user_id.set(user_id)
+        try:
+            return await coro
+        finally:
+            _current_user_id.reset(token)
+
+    return _run
+
+
+@pytest.fixture
 def mock_ollama_response():
     """Mock Ollama API response."""
     return {

@@ -22,9 +22,14 @@ from app.db import (
 @pytest.mark.asyncio
 async def test_create_reminder(test_db: AsyncSession):
     """Test creating a reminder in database."""
+    user = User(email="db_reminder@test.com", name="DB User")
+    test_db.add(user)
+    await test_db.flush()
+
     reminder = Reminder(
+        user_id=user.id,
         text="Test reminder",
-        remind_at=datetime.now(timezone.utc)
+        remind_at=datetime.now(timezone.utc),
     )
 
     test_db.add(reminder)
@@ -38,9 +43,14 @@ async def test_create_reminder(test_db: AsyncSession):
 @pytest.mark.asyncio
 async def test_create_note(test_db: AsyncSession):
     """Test creating a note in database."""
+    user = User(email="db_note@test.com", name="Note User")
+    test_db.add(user)
+    await test_db.flush()
+
     note = Note(
+        user_id=user.id,
         content="Test note content",
-        tags='["test", "database"]'
+        tags='["test", "database"]',
     )
 
     test_db.add(note)
@@ -54,15 +64,20 @@ async def test_create_note(test_db: AsyncSession):
 @pytest.mark.asyncio
 async def test_conversation_log(test_db: AsyncSession):
     """Test logging conversation messages."""
+    user = User(email="db_conv@test.com", name="Conv User")
+    test_db.add(user)
+    await test_db.flush()
+
     messages = [
-        ConversationLog(role="user", content="Hello Athena"),
-        ConversationLog(role="assistant", content="Hello! How can I help you?"),
-        ConversationLog(role="user", content="What's the weather?"),
+        ConversationLog(user_id=user.id, role="user", content="Hello Athena"),
+        ConversationLog(user_id=user.id, role="assistant", content="Hello! How can I help you?"),
+        ConversationLog(user_id=user.id, role="user", content="What's the weather?"),
         ConversationLog(
+            user_id=user.id,
             role="assistant",
             content="Let me check the weather for you.",
-            tool_calls='[{"tool": "get_weather", "args": {}}]'
-        )
+            tool_calls='[{"tool": "get_weather", "args": {}}]',
+        ),
     ]
 
     for msg in messages:
@@ -101,10 +116,14 @@ async def test_user_creation(test_db: AsyncSession):
 @pytest.mark.asyncio
 async def test_user_preferences(test_db: AsyncSession):
     """Test storing user preferences."""
+    user = User(email="db_prefs@test.com", name="Prefs User")
+    test_db.add(user)
+    await test_db.flush()
+
     prefs = [
-        UserPreference(key="theme", value="dark"),
-        UserPreference(key="voice_speed", value="1.0"),
-        UserPreference(key="tts_enabled", value="true")
+        UserPreference(user_id=user.id, key="theme", value="dark"),
+        UserPreference(user_id=user.id, key="voice_speed", value="1.0"),
+        UserPreference(user_id=user.id, key="tts_enabled", value="true"),
     ]
 
     for pref in prefs:
@@ -112,8 +131,9 @@ async def test_user_preferences(test_db: AsyncSession):
 
     await test_db.commit()
 
-    # Query preferences
-    result = await test_db.execute(select(UserPreference))
+    result = await test_db.execute(
+        select(UserPreference).where(UserPreference.user_id == user.id)
+    )
     stored_prefs = result.scalars().all()
 
     assert len(stored_prefs) == 3
@@ -122,13 +142,18 @@ async def test_user_preferences(test_db: AsyncSession):
 @pytest.mark.asyncio
 async def test_smart_home_device(test_db: AsyncSession):
     """Test storing smart home device info."""
+    user = User(email="db_smarthome@test.com", name="SmartHome User")
+    test_db.add(user)
+    await test_db.flush()
+
     device = SmartHomeDevice(
+        user_id=user.id,
         entity_id="light.living_room",
         name="Living Room Light",
         device_type="light",
         room="Living Room",
         icon="mdi:lightbulb",
-        is_favorite=True
+        is_favorite=True,
     )
 
     test_db.add(device)
@@ -144,16 +169,21 @@ async def test_routine_creation(test_db: AsyncSession):
     """Test creating a routine."""
     import json
 
+    user = User(email="db_routine@test.com", name="Routine User")
+    test_db.add(user)
+    await test_db.flush()
+
     routine = Routine(
+        user_id=user.id,
         name="Morning Routine",
         description="Turn on lights and play news",
         trigger_type="time",
         trigger_config=json.dumps({"time": "07:00", "days": ["mon", "tue", "wed", "thu", "fri"]}),
         actions=json.dumps([
             {"action": "turn_on", "entity_id": "light.bedroom"},
-            {"action": "speak", "text": "Good morning! Here's your briefing."}
+            {"action": "speak", "text": "Good morning! Here's your briefing."},
         ]),
-        enabled=True
+        enabled=True,
     )
 
     test_db.add(routine)
@@ -167,10 +197,15 @@ async def test_routine_creation(test_db: AsyncSession):
 @pytest.mark.asyncio
 async def test_background_task(test_db: AsyncSession):
     """Test background task tracking."""
+    user = User(email="db_task@test.com", name="Task User")
+    test_db.add(user)
+    await test_db.flush()
+
     task = BackgroundTask(
+        user_id=user.id,
         task_type="research",
         prompt="Research the latest trends in AI",
-        status="pending"
+        status="pending",
     )
 
     test_db.add(task)
@@ -195,13 +230,18 @@ async def test_background_task(test_db: AsyncSession):
 @pytest.mark.asyncio
 async def test_notification_log(test_db: AsyncSession):
     """Test notification logging."""
+    user = User(email="db_notif@test.com", name="Notif User")
+    test_db.add(user)
+    await test_db.flush()
+
     notification = NotificationLog(
+        user_id=user.id,
         event_type="reminder_due",
         priority="high",
         title="Reminder: Team Meeting",
         body="Your team meeting starts in 5 minutes",
         data='{"reminder_id": 123}',
-        read=False
+        read=False,
     )
 
     test_db.add(notification)
@@ -211,7 +251,6 @@ async def test_notification_log(test_db: AsyncSession):
     assert notification.id is not None
     assert notification.read is False
 
-    # Mark as read
     notification.read = True
     await test_db.commit()
 
@@ -219,25 +258,14 @@ async def test_notification_log(test_db: AsyncSession):
 @pytest.mark.asyncio
 async def test_query_unread_notifications(test_db: AsyncSession):
     """Test querying unread notifications."""
+    user = User(email="db_unread@test.com", name="Unread User")
+    test_db.add(user)
+    await test_db.flush()
+
     notifications = [
-        NotificationLog(
-            event_type="info",
-            priority="normal",
-            title="System Update",
-            read=True
-        ),
-        NotificationLog(
-            event_type="reminder_due",
-            priority="high",
-            title="Important Reminder",
-            read=False
-        ),
-        NotificationLog(
-            event_type="alert",
-            priority="high",
-            title="Security Alert",
-            read=False
-        )
+        NotificationLog(user_id=user.id, event_type="info", priority="normal", title="System Update", read=True),
+        NotificationLog(user_id=user.id, event_type="reminder_due", priority="high", title="Important Reminder", read=False),
+        NotificationLog(user_id=user.id, event_type="alert", priority="high", title="Security Alert", read=False),
     ]
 
     for notif in notifications:
@@ -245,9 +273,11 @@ async def test_query_unread_notifications(test_db: AsyncSession):
 
     await test_db.commit()
 
-    # Query unread
     result = await test_db.execute(
-        select(NotificationLog).where(NotificationLog.read == False)
+        select(NotificationLog).where(
+            NotificationLog.user_id == user.id,
+            NotificationLog.read == False,
+        )
     )
     unread = result.scalars().all()
 

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import Reminder
+from app.db import Reminder, User
 
 BASE = "/api/reminders"
 
@@ -136,9 +136,14 @@ async def test_reminder_database_persistence(test_db: AsyncSession, sample_remin
     """Test that reminders are properly persisted to database."""
     from sqlalchemy import select
 
+    user = User(email="persist_reminder@test.com", name="Persist User")
+    test_db.add(user)
+    await test_db.flush()
+
     reminder = Reminder(
+        user_id=user.id,
         text=sample_reminder_data["text"],
-        remind_at=datetime.fromisoformat(sample_reminder_data["remind_at"])
+        remind_at=datetime.fromisoformat(sample_reminder_data["remind_at"]),
     )
     test_db.add(reminder)
     await test_db.commit()
