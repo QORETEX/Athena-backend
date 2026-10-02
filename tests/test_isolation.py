@@ -20,11 +20,13 @@ from app.db import (
     Contact,
     ConversationLog,
     FocusSession,
+    JournalEntry,
     Note,
     NotificationLog,
     QuickAction,
     Reminder,
     Routine,
+    SmartHomeDevice,
     UserKnowledge,
     UserPreference,
 )
@@ -48,6 +50,8 @@ COVERED: frozenset[str] = frozenset(
         "/api/preferences",
         "/api/memory",    # covers memory_facts.py (/api/memory/facts) and memory.py
         "/api/learning",
+        "/api/journal",
+        "/api/smart-home",
     }
 )
 
@@ -71,8 +75,6 @@ EXEMPT: dict[str, str] = {
     "/api/knowledge": "ChromaDB knowledge base; not available in test env",
     "/api/patterns": "pattern service bypasses DI; handlers have no user context",
     "/api/memory-enhanced": "LTM service bypasses DI; handlers have no user context",
-    "/api/smart-home": "router-level guard (Depends(_require_smart_home)) returns 503 when HASS_URL/HASS_TOKEN unset; untestable without HA integration",
-    "/api/journal": "route handlers use async_session() directly (not get_db); test DB injection cannot reach them",
     "/api/_test_access_log_500": "test-only route added to the app by tests/test_access_log.py; no user data",
     "/api/_test_access_log_ok": "test-only route added to the app by tests/test_access_log.py; no user data",
 }
@@ -382,6 +384,64 @@ async def test_memory_facts_isolation(user_a, user_b, client_a, client_b, test_d
     assert resp_a.status_code == 200
     keys_a = [f["key"] for f in resp_a.json()]
     assert "iso_test_secret" in keys_a, "A's memory fact disappeared"
+
+
+@pytest.mark.asyncio
+async def test_smart_home_isolation(user_a, user_b, client_a, client_b, test_db):
+    from main import app
+    from app.routes.smart_home import _require_smart_home
+
+    # Patch the 503 guard so test requests reach the handlers
+    app.dependency_overrides[_require_smart_home] = lambda: None
+    try:
+        row = SmartHomeDevice(
+            user_id=user_a["id"],
+            entity_id="light.a_secret",
+            name="A's secret light",
+            device_type="light",
+        )
+        test_db.add(row)
+        await test_db.commit()
+        await test_db.refresh(row)
+
+        resp_b = client_b.get("/api/smart-home/devices")
+        assert resp_b.status_code == 200
+        ids_b = [d["id"] for d in resp_b.json()]
+        assert row.id not in ids_b, "B can see A's smart home device (isolation violation)"
+
+        assert client_b.patch(f"/api/smart-home/devices/{row.id}", json={"name": "hacked"}).status_code == 404
+        assert client_b.delete(f"/api/smart-home/devices/{row.id}").status_code == 404
+
+        resp_a = client_a.get("/api/smart-home/devices")
+        assert resp_a.status_code == 200
+        assert row.id in [d["id"] for d in resp_a.json()], "A's device disappeared"
+    finally:
+        app.dependency_overrides.pop(_require_smart_home, None)
+
+
+@pytest.mark.asyncio
+async def test_journal_isolation(user_a, user_b, client_a, client_b, test_db):
+    row = JournalEntry(
+        user_id=user_a["id"],
+        content="A's private journal entry",
+        mood="happy",
+    )
+    test_db.add(row)
+    await test_db.commit()
+    await test_db.refresh(row)
+
+    resp_b = client_b.get("/api/journal/entries")
+    assert resp_b.status_code == 200
+    entries_b = resp_b.json().get("entries", [])
+    ids_b = [e["id"] for e in entries_b]
+    assert row.id not in ids_b, "B can see A's journal entry (isolation violation)"
+
+    assert client_b.get(f"/api/journal/{row.id}").status_code == 404
+
+    resp_a = client_a.get("/api/journal/entries")
+    assert resp_a.status_code == 200
+    entries_a = resp_a.json().get("entries", [])
+    assert row.id in [e["id"] for e in entries_a], "A's journal entry disappeared"
 
 
 @pytest.mark.asyncio

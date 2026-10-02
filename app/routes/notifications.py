@@ -9,7 +9,8 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import NotificationLog, get_db
+from app.auth.dependencies import get_current_user
+from app.db import NotificationLog, User, get_db, get_owned_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +41,12 @@ async def list_notifications(
     unread_only: bool = False,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """List recent notifications, newest first."""
     stmt = (
         select(NotificationLog)
+        .where(NotificationLog.user_id == current_user.id)
         .order_by(NotificationLog.created_at.desc())
         .limit(limit)
     )
@@ -69,9 +72,13 @@ async def list_notifications(
 
 
 @router.post("/{notification_id}/read")
-async def mark_read(notification_id: int, db: AsyncSession = Depends(get_db)):
+async def mark_read(
+    notification_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Mark a single notification as read."""
-    notif = await db.get(NotificationLog, notification_id)
+    notif = await get_owned_or_none(db, NotificationLog, notification_id, current_user.id)
     if not notif:
         raise HTTPException(status_code=404, detail="Notification not found")
     notif.read = True
@@ -80,11 +87,14 @@ async def mark_read(notification_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/read-all")
-async def mark_all_read(db: AsyncSession = Depends(get_db)):
+async def mark_all_read(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Mark all unread notifications as read."""
     stmt = (
         update(NotificationLog)
-        .where(NotificationLog.read == False)  # noqa: E712
+        .where(NotificationLog.user_id == current_user.id, NotificationLog.read == False)  # noqa: E712
         .values(read=True)
     )
     result = await db.execute(stmt)
@@ -92,10 +102,14 @@ async def mark_all_read(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/unread-count")
-async def unread_count(db: AsyncSession = Depends(get_db)):
+async def unread_count(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Return the count of unread notifications."""
     stmt = select(func.count(NotificationLog.id)).where(
-        NotificationLog.read == False  # noqa: E712
+        NotificationLog.user_id == current_user.id,
+        NotificationLog.read == False,  # noqa: E712
     )
     result = await db.execute(stmt)
     count = result.scalar() or 0

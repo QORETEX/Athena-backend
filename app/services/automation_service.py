@@ -18,8 +18,9 @@ logger = logging.getLogger(__name__)
 class AutomationService:
     """Service for managing and executing automation rules"""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, user_id: int):
         self.db = db
+        self.user_id = user_id
 
     async def create_rule(
         self,
@@ -33,6 +34,7 @@ class AutomationService:
     ) -> AutomationRule:
         """Create a new automation rule"""
         rule = AutomationRule(
+            user_id=self.user_id,
             name=name,
             description=description,
             trigger_conditions=json.dumps(trigger_conditions),
@@ -49,7 +51,9 @@ class AutomationService:
 
     async def get_all_rules(self, enabled_only: bool = False) -> List[AutomationRule]:
         """Get all automation rules"""
-        query = select(AutomationRule).order_by(AutomationRule.priority.desc())
+        query = select(AutomationRule).where(
+            AutomationRule.user_id == self.user_id
+        ).order_by(AutomationRule.priority.desc())
         if enabled_only:
             query = query.where(AutomationRule.enabled == True)
 
@@ -59,7 +63,10 @@ class AutomationService:
     async def get_rule(self, rule_id: int) -> Optional[AutomationRule]:
         """Get a specific rule by ID"""
         result = await self.db.execute(
-            select(AutomationRule).where(AutomationRule.id == rule_id)
+            select(AutomationRule).where(
+                AutomationRule.id == rule_id,
+                AutomationRule.user_id == self.user_id,
+            )
         )
         return result.scalar_one_or_none()
 
@@ -237,7 +244,7 @@ class AutomationService:
 
                 remind_at = datetime.now(timezone.utc) + timedelta(hours=1)
 
-            reminder = Reminder(text=text, remind_at=remind_at)
+            reminder = Reminder(user_id=self.user_id, text=text, remind_at=remind_at)
             self.db.add(reminder)
             await self.db.commit()
             return {"reminder_id": reminder.id}

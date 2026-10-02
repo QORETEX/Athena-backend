@@ -11,8 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Body, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.dependencies import get_current_user
 from app.config import get_settings
-from app.db import get_db
+from app.db import User, get_db
 from app.rate_limit import limiter
 from app.services.learning_service import LearningService
 
@@ -74,10 +75,12 @@ JARVIS: "Your usual: double espresso with oat milk? The nearest cafe is Starbuck
 **Effect:** JARVIS becomes more personalized over time
 """)
 async def teach_knowledge(
-    knowledge: KnowledgeCreate, db: AsyncSession = Depends(get_db)
+    knowledge: KnowledgeCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Teach JARVIS new knowledge"""
-    service = LearningService(db)
+    service = LearningService(db, current_user.id)
 
     learned = await service.teach(
         category=knowledge.category,
@@ -110,10 +113,12 @@ Get all knowledge JARVIS has learned about you.
 **JARVIS use:** Build comprehensive user profile
 """)
 async def get_all_knowledge(
-    category: Optional[str] = None, db: AsyncSession = Depends(get_db)
+    category: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get all knowledge"""
-    service = LearningService(db)
+    service = LearningService(db, current_user.id)
     knowledge = await service.get_all_knowledge(category=category)
 
     return [
@@ -143,10 +148,13 @@ Get specific knowledge by category and key.
 **JARVIS use:** Quick lookup of user preferences
 """)
 async def get_knowledge(
-    category: str, key: str, db: AsyncSession = Depends(get_db)
+    category: str,
+    key: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get specific knowledge"""
-    service = LearningService(db)
+    service = LearningService(db, current_user.id)
     knowledge = await service.get_knowledge(category, key)
 
     if not knowledge:
@@ -181,10 +189,12 @@ User: "What do you know about my coffee preferences?"
 → Return all coffee-related knowledge
 """)
 async def search_knowledge(
-    q: str = Query(..., description="Search query"), db: AsyncSession = Depends(get_db)
+    q: str = Query(..., description="Search query"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Search knowledge"""
-    service = LearningService(db)
+    service = LearningService(db, current_user.id)
     results = await service.search_knowledge(q)
 
     return {
@@ -212,9 +222,13 @@ JARVIS: "Understood, I've forgotten that information."
 
 **Use case:** Correct mistakes or remove outdated information
 """)
-async def forget_knowledge(knowledge_id: int, db: AsyncSession = Depends(get_db)):
+async def forget_knowledge(
+    knowledge_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Delete knowledge"""
-    service = LearningService(db)
+    service = LearningService(db, current_user.id)
     success = await service.delete_knowledge(knowledge_id)
 
     if not success:
@@ -253,10 +267,13 @@ Query knowledge base with natural language.
 """)
 @limiter.limit(get_settings().rate_limit_llm)
 async def query_knowledge(
-    request: Request, query: KnowledgeQuery, db: AsyncSession = Depends(get_db)
+    request: Request,
+    query: KnowledgeQuery,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Query knowledge with natural language"""
-    service = LearningService(db)
+    service = LearningService(db, current_user.id)
     result = await service.query(query.question, query.context)
 
     return result
@@ -296,9 +313,10 @@ async def extract_from_conversation(
     request: Request,
     conversation: str = Body(..., embed=True),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Extract knowledge from conversation"""
-    service = LearningService(db)
+    service = LearningService(db, current_user.id)
     extracted = await service.extract_knowledge_from_conversation(conversation)
 
     return {
@@ -321,9 +339,13 @@ Show how different pieces of knowledge connect:
 
 **JARVIS use:** Build semantic understanding of user's life
 """)
-async def get_knowledge_graph(knowledge_id: int, db: AsyncSession = Depends(get_db)):
+async def get_knowledge_graph(
+    knowledge_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Get knowledge graph"""
-    service = LearningService(db)
+    service = LearningService(db, current_user.id)
     graph = await service.get_knowledge_graph(knowledge_id)
 
     return graph
@@ -352,9 +374,12 @@ Get statistics about JARVIS's knowledge.
 
 **Use case:** Show how much JARVIS knows about you
 """)
-async def get_stats(db: AsyncSession = Depends(get_db)):
+async def get_stats(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Get knowledge statistics"""
-    service = LearningService(db)
+    service = LearningService(db, current_user.id)
     stats = await service.get_stats()
 
     return stats
@@ -379,10 +404,13 @@ JARVIS: "Understood. I'll remember you're allergic to peanuts and won't suggest 
 """)
 @limiter.limit(get_settings().rate_limit_llm)
 async def teach_from_voice(
-    request: Request, command: str = Body(..., embed=True), db: AsyncSession = Depends(get_db)
+    request: Request,
+    command: str = Body(..., embed=True),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Parse and teach from natural voice command"""
-    service = LearningService(db)
+    service = LearningService(db, current_user.id)
 
     # Use AI to parse the command
     try:

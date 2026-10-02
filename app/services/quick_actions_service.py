@@ -18,8 +18,9 @@ logger = logging.getLogger(__name__)
 class QuickActionsService:
     """Service for managing and executing quick actions/shortcuts"""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, user_id: int):
         self.db = db
+        self.user_id = user_id
 
     async def create_action(
         self,
@@ -32,6 +33,7 @@ class QuickActionsService:
     ) -> QuickAction:
         """Create a new quick action"""
         action = QuickAction(
+            user_id=self.user_id,
             name=name,
             trigger_phrase=trigger_phrase.lower(),
             description=description,
@@ -49,7 +51,9 @@ class QuickActionsService:
         self, enabled_only: bool = False, category: Optional[str] = None
     ) -> List[QuickAction]:
         """Get all quick actions"""
-        query = select(QuickAction).order_by(QuickAction.name)
+        query = select(QuickAction).where(
+            QuickAction.user_id == self.user_id
+        ).order_by(QuickAction.name)
 
         if enabled_only:
             query = query.where(QuickAction.enabled == True)
@@ -63,7 +67,9 @@ class QuickActionsService:
     async def get_action(self, action_id: int) -> Optional[QuickAction]:
         """Get a specific quick action"""
         result = await self.db.execute(
-            select(QuickAction).where(QuickAction.id == action_id)
+            select(QuickAction).where(
+                QuickAction.id == action_id, QuickAction.user_id == self.user_id
+            )
         )
         return result.scalar_one_or_none()
 
@@ -71,6 +77,7 @@ class QuickActionsService:
         """Get action by trigger phrase"""
         result = await self.db.execute(
             select(QuickAction).where(
+                QuickAction.user_id == self.user_id,
                 QuickAction.trigger_phrase == trigger.lower(),
                 QuickAction.enabled == True,
             )
@@ -198,7 +205,7 @@ class QuickActionsService:
             hours_from_now = params.get("hours_from_now", 1)
             remind_at = datetime.now(timezone.utc) + timedelta(hours=hours_from_now)
 
-            reminder = Reminder(text=text, remind_at=remind_at)
+            reminder = Reminder(user_id=self.user_id, text=text, remind_at=remind_at)
             self.db.add(reminder)
             await self.db.commit()
             return {"type": "reminder", "reminder_id": reminder.id}

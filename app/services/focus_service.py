@@ -17,8 +17,9 @@ logger = logging.getLogger(__name__)
 class FocusService:
     """Service for managing focus mode and deep work sessions"""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, user_id: int):
         self.db = db
+        self.user_id = user_id
 
     async def start_focus_session(
         self,
@@ -29,6 +30,7 @@ class FocusService:
     ) -> FocusSession:
         """Start a new focus session"""
         session = FocusSession(
+            user_id=self.user_id,
             start_time=datetime.now(timezone.utc),
             focus_type=focus_type,
             planned_duration_minutes=planned_duration_minutes,
@@ -79,7 +81,7 @@ class FocusService:
         """Get the currently active focus session"""
         result = await self.db.execute(
             select(FocusSession)
-            .where(FocusSession.end_time.is_(None))
+            .where(FocusSession.user_id == self.user_id, FocusSession.end_time.is_(None))
             .order_by(desc(FocusSession.start_time))
             .limit(1)
         )
@@ -88,7 +90,9 @@ class FocusService:
     async def get_session(self, session_id: int) -> Optional[FocusSession]:
         """Get a specific focus session"""
         result = await self.db.execute(
-            select(FocusSession).where(FocusSession.id == session_id)
+            select(FocusSession).where(
+                FocusSession.id == session_id, FocusSession.user_id == self.user_id
+            )
         )
         return result.scalar_one_or_none()
 
@@ -100,7 +104,7 @@ class FocusService:
 
         result = await self.db.execute(
             select(FocusSession)
-            .where(FocusSession.start_time >= start_date)
+            .where(FocusSession.user_id == self.user_id, FocusSession.start_time >= start_date)
             .order_by(desc(FocusSession.start_time))
             .limit(limit)
         )

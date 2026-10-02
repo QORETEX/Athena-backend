@@ -6,12 +6,14 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, UploadFile, File, Form, Query, Path, Request
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Path, Request
 from pydantic import BaseModel
 from sqlalchemy import select, or_
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.dependencies import get_current_user
 from app.config import get_settings
-from app.db import async_session, JournalEntry
+from app.db import JournalEntry, User, get_db, get_owned_or_none
 from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
@@ -44,30 +46,35 @@ Athena: "Entry saved. Tagged: work, success, API"
 **Returns:** Entry ID and AI-generated summary
 """)
 @limiter.limit(get_settings().rate_limit_llm)
-async def create_journal_entry(request: Request, entry: JournalEntryRequest):
+async def create_journal_entry(
+    request: Request,
+    entry: JournalEntryRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Create a new journal entry"""
-    async with async_session() as session:
-        # Extract key points using Claude
-        key_points = await _extract_key_points(entry.content)
+    # Extract key points using Claude
+    key_points = await _extract_key_points(entry.content)
 
-        journal = JournalEntry(
-            content=entry.content,
-            tags=str(entry.tags),
-            mood=entry.mood or await _detect_mood(entry.content),
-            key_points=key_points
-        )
+    journal = JournalEntry(
+        user_id=current_user.id,
+        content=entry.content,
+        tags=str(entry.tags),
+        mood=entry.mood or await _detect_mood(entry.content),
+        key_points=key_points,
+    )
 
-        session.add(journal)
-        await session.commit()
-        await session.refresh(journal)
+    db.add(journal)
+    await db.flush()
+    await db.refresh(journal)
 
-        return {
-            "id": journal.id,
-            "created_at": journal.created_at.isoformat(),
-            "mood": journal.mood,
-            "key_points": key_points,
-            "tags": entry.tags
-        }
+    return {
+        "id": journal.id,
+        "created_at": journal.created_at.isoformat(),
+        "mood": journal.mood,
+        "key_points": key_points,
+        "tags": entry.tags,
+    }
 
 
 @router.post("/entry/voice", summary="Voice journal entry", description="""
@@ -91,7 +98,9 @@ Create journal entry from voice recording.
 async def create_voice_journal_entry(
     request: Request,
     audio: UploadFile = File(..., description="Audio file (WAV/MP3/M4A)"),
-    tags: str = Form("[]", description="Optional tags as JSON array")
+    tags: str = Form("[]", description="Optional tags as JSON array"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Create journal entry from voice recording"""
     import json
@@ -103,29 +112,28 @@ async def create_voice_journal_entry(
     if not transcript:
         return {"error": "Failed to transcribe audio"}
 
-    # Create entry
-    async with async_session() as session:
-        key_points = await _extract_key_points(transcript)
-        mood = await _detect_mood(transcript)
+    key_points = await _extract_key_points(transcript)
+    mood = await _detect_mood(transcript)
 
-        journal = JournalEntry(
-            content=transcript,
-            transcript=transcript,
-            tags=tags,
-            mood=mood,
-            key_points=key_points
-        )
+    journal = JournalEntry(
+        user_id=current_user.id,
+        content=transcript,
+        transcript=transcript,
+        tags=tags,
+        mood=mood,
+        key_points=key_points,
+    )
 
-        session.add(journal)
-        await session.commit()
-        await session.refresh(journal)
+    db.add(journal)
+    await db.flush()
+    await db.refresh(journal)
 
-        return {
-            "id": journal.id,
-            "transcript": transcript[:200] + "...",
-            "mood": mood,
-            "key_points": key_points
-        }
+    return {
+        "id": journal.id,
+        "transcript": transcript[:200] + "...",
+        "mood": mood,
+        "key_points": key_points,
+    }
 
 
 @router.get("/entries", summary="List journal entries", description="""
@@ -144,37 +152,39 @@ Get journal entries with optional filtering.
 async def list_journal_entries(
     limit: int = Query(20, description="Max entries to return", ge=1, le=100),
     mood: str | None = Query(None, description="Filter by mood"),
-    days_back: int = Query(7, description="Days to look back", ge=1, le=365)
+    days_back: int = Query(7, description="Days to look back", ge=1, le=365),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """List journal entries"""
-    async with async_session() as session:
-        since = datetime.now(timezone.utc) - timedelta(days=days_back)
+    since = datetime.now(timezone.utc) - timedelta(days=days_back)
 
-        stmt = select(JournalEntry).where(
-            JournalEntry.created_at >= since
-        )
+    stmt = select(JournalEntry).where(
+        JournalEntry.user_id == current_user.id,
+        JournalEntry.created_at >= since,
+    )
 
-        if mood:
-            stmt = stmt.where(JournalEntry.mood == mood)
+    if mood:
+        stmt = stmt.where(JournalEntry.mood == mood)
 
-        stmt = stmt.order_by(JournalEntry.created_at.desc()).limit(limit)
+    stmt = stmt.order_by(JournalEntry.created_at.desc()).limit(limit)
 
-        result = await session.execute(stmt)
-        entries = result.scalars().all()
+    result = await db.execute(stmt)
+    entries = result.scalars().all()
 
-        return {
-            "count": len(entries),
-            "entries": [
-                {
-                    "id": e.id,
-                    "content": e.content[:200] + "..." if len(e.content) > 200 else e.content,
-                    "mood": e.mood,
-                    "key_points": e.key_points,
-                    "created_at": e.created_at.isoformat()
-                }
-                for e in entries
-            ]
-        }
+    return {
+        "count": len(entries),
+        "entries": [
+            {
+                "id": e.id,
+                "content": e.content[:200] + "..." if len(e.content) > 200 else e.content,
+                "mood": e.mood,
+                "key_points": e.key_points,
+                "created_at": e.created_at.isoformat(),
+            }
+            for e in entries
+        ],
+    }
 
 
 @router.get("/search", summary="Search journal entries", description="""
@@ -191,33 +201,35 @@ Search through journal entries using keywords.
 """)
 async def search_journal(
     query: str = Query(..., description="Search query"),
-    limit: int = Query(10, description="Max results", ge=1, le=50)
+    limit: int = Query(10, description="Max results", ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Search journal entries"""
-    async with async_session() as session:
-        stmt = select(JournalEntry).where(
-            or_(
-                JournalEntry.content.ilike(f"%{query}%"),
-                JournalEntry.key_points.ilike(f"%{query}%")
-            )
-        ).order_by(JournalEntry.created_at.desc()).limit(limit)
+    stmt = select(JournalEntry).where(
+        JournalEntry.user_id == current_user.id,
+        or_(
+            JournalEntry.content.ilike(f"%{query}%"),
+            JournalEntry.key_points.ilike(f"%{query}%"),
+        ),
+    ).order_by(JournalEntry.created_at.desc()).limit(limit)
 
-        result = await session.execute(stmt)
-        entries = result.scalars().all()
+    result = await db.execute(stmt)
+    entries = result.scalars().all()
 
-        return {
-            "query": query,
-            "count": len(entries),
-            "entries": [
-                {
-                    "id": e.id,
-                    "content": e.content[:200],
-                    "key_points": e.key_points,
-                    "created_at": e.created_at.isoformat()
-                }
-                for e in entries
-            ]
-        }
+    return {
+        "query": query,
+        "count": len(entries),
+        "entries": [
+            {
+                "id": e.id,
+                "content": e.content[:200],
+                "key_points": e.key_points,
+                "created_at": e.created_at.isoformat(),
+            }
+            for e in entries
+        ],
+    }
 
 
 @router.get("/{entry_id}", summary="Get journal entry details", description="""
@@ -234,26 +246,23 @@ Get full details of a specific journal entry.
 async def get_journal_entry(
     request: Request,
     entry_id: int = Path(..., description="Journal entry ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get full journal entry"""
-    async with async_session() as session:
-        result = await session.execute(
-            select(JournalEntry).where(JournalEntry.id == entry_id)
-        )
-        entry = result.scalar_one_or_none()
+    entry = await get_owned_or_none(db, JournalEntry, entry_id, current_user.id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
 
-        if not entry:
-            return {"error": "Entry not found"}
-
-        return {
-            "id": entry.id,
-            "content": entry.content,
-            "transcript": entry.transcript,
-            "mood": entry.mood,
-            "key_points": entry.key_points,
-            "tags": entry.tags,
-            "created_at": entry.created_at.isoformat()
-        }
+    return {
+        "id": entry.id,
+        "content": entry.content,
+        "transcript": entry.transcript,
+        "mood": entry.mood,
+        "key_points": entry.key_points,
+        "tags": entry.tags,
+        "created_at": entry.created_at.isoformat(),
+    }
 
 
 # Helper functions
