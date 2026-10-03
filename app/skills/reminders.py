@@ -18,6 +18,8 @@ _TIME_ERROR = (
 
 
 async def handle_set_reminder(text: str, time: str) -> dict:
+    from app.chat.pipeline import current_user_id
+    user_id = current_user_id()
     try:
         remind_at = datetime.fromisoformat(time)
     except (ValueError, OverflowError):
@@ -26,7 +28,7 @@ async def handle_set_reminder(text: str, time: str) -> dict:
     if remind_at.tzinfo is None:
         return {"success": False, "error": _TIME_ERROR}
 
-    reminder = Reminder(text=text, remind_at=remind_at)
+    reminder = Reminder(user_id=user_id, text=text, remind_at=remind_at)
     async with async_session() as session:
         session.add(reminder)
         await session.commit()
@@ -35,7 +37,7 @@ async def handle_set_reminder(text: str, time: str) -> dict:
     try:
         from app.scheduler import schedule_reminder
 
-        schedule_reminder(reminder.id, remind_at, text)
+        schedule_reminder(reminder.id, remind_at, text, user_id)
     except Exception as e:
         logger.warning("Could not schedule reminder %d: %s", reminder.id, e)
 
@@ -47,10 +49,12 @@ async def handle_set_reminder(text: str, time: str) -> dict:
 
 
 async def handle_list_reminders() -> dict:
+    from app.chat.pipeline import current_user_id
+    user_id = current_user_id()
     async with async_session() as session:
         result = await session.execute(
             select(Reminder)
-            .where(Reminder.completed == False)
+            .where(Reminder.user_id == user_id, Reminder.completed == False)
             .order_by(Reminder.remind_at)
             .limit(20)
         )

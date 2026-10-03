@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
@@ -29,11 +30,13 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
     name: str | None = None
+    timezone: str | None = None
 
 
 class LoginRequest(BaseModel):
     email: str
     password: str
+    timezone: str | None = None
 
 
 def _normalize(email: str) -> str:
@@ -51,6 +54,7 @@ def _user_dict(user: User) -> dict:
         "email": user.email,
         "name": user.name,
         "preferred_name": user.preferred_name,
+        "timezone": user.timezone,
         "avatar_url": user.avatar_url,
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "last_login": user.last_login.isoformat() if user.last_login else None,
@@ -75,6 +79,11 @@ async def register(
 
     email = _normalize(body.email)
     _check_password_length(body.password)
+    if body.timezone:
+        try:
+            ZoneInfo(body.timezone)
+        except Exception:
+            raise HTTPException(status_code=422, detail="Invalid IANA timezone")
 
     stmt = select(User).where(User.email == email)
     if (await db.execute(stmt)).scalar_one_or_none():
@@ -90,6 +99,7 @@ async def register(
         is_active=True,
         created_at=now,
         last_login=now,
+        timezone=body.timezone or "UTC",
     )
     db.add(user)
     await db.flush()
@@ -151,6 +161,12 @@ async def login(
 
     if not user.is_active:
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    if body.timezone:
+        try:
+            ZoneInfo(body.timezone)
+        except Exception:
+            raise HTTPException(status_code=422, detail="Invalid IANA timezone")
+        user.timezone = body.timezone
 
     now = datetime.now(timezone.utc)
     user.last_login = now

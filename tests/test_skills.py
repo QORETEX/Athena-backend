@@ -322,7 +322,11 @@ def test_system_prompt_no_unavailable_skill_summaries():
 
 
 def test_api_skills_available_matches_server_tools(authenticated_client):
-    """GET /api/skills?available=true must return the same skill names as get_server_tools()."""
+    """GET /api/skills?available=true must return the same skill names as get_server_tools().
+
+    ``list_skills`` is intentionally excluded from the API response (it is a
+    meta-skill; listing it would be circular), so we subtract it before comparing.
+    """
     from app.skills.base import get_server_tools
 
     resp = authenticated_client.get("/api/skills/?available=true")
@@ -330,6 +334,8 @@ def test_api_skills_available_matches_server_tools(authenticated_client):
     api_names = {s["name"] for s in resp.json()}
 
     server_tool_names = {t["function"]["name"] for t in get_server_tools()}
+    # list_skills is explicitly excluded from the API response (routes/skills.py line ~31)
+    server_tool_names -= {"list_skills"}
 
     assert api_names == server_tool_names, (
         f"GET /api/skills?available=true and get_server_tools() disagree.\n"

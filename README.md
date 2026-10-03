@@ -77,8 +77,12 @@ cp .env.example .env
 # - GROQ_API_KEY (get free from console.groq.com)
 
 # Apply migrations and start server
-alembic upgrade head && uvicorn main:app --reload --no-access-log
+rm athena_dev.db && alembic upgrade head && uvicorn main:app --reload --no-access-log
 ```
+
+The local database must be dropped and rebuilt after the multi-user schema migration:
+`rm athena_dev.db && alembic upgrade head`. This migration intentionally has no backfill
+for pre-existing local data.
 
 Server runs at: **http://localhost:8000**
 

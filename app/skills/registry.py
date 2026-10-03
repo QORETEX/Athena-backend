@@ -22,6 +22,7 @@ def register_all_skills() -> None:
         calendar,
         device_context,
         device_control,
+        daily_briefing,
         image_gen,
         knowledge_search,
         list_skills,

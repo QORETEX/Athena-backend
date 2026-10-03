@@ -28,6 +28,7 @@ async def list_skills(
     all_skills = skills_for(client_capabilities=client_capabilities, user=current_user)
     if available is True:
         all_skills = [s for s in all_skills if s.available]
+        all_skills = [s for s in all_skills if s.name != "list_skills"]
     return [
         {
             "name": s.name,

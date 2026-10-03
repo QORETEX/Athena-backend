@@ -11,8 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Body, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.dependencies import get_current_user
 from app.config import get_settings
-from app.db import get_db
+from app.db import User, get_db
 from app.rate_limit import limiter
 from app.services.quick_actions_service import QuickActionsService
 
@@ -71,10 +72,12 @@ JARVIS executes: Check calendar → Check traffic → Start navigation → Play 
 **Use case:** Multi-step workflows in one command
 """)
 async def create_action(
-    action: QuickActionCreate, db: AsyncSession = Depends(get_db)
+    action: QuickActionCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Create a quick action"""
-    service = QuickActionsService(db)
+    service = QuickActionsService(db, current_user.id)
 
     created = await service.create_action(
         name=action.name,
@@ -115,9 +118,10 @@ async def list_actions(
     enabled_only: bool = False,
     category: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """List all quick actions"""
-    service = QuickActionsService(db)
+    service = QuickActionsService(db, current_user.id)
     actions = await service.get_all_actions(
         enabled_only=enabled_only, category=category
     )
@@ -144,9 +148,13 @@ async def list_actions(
 @router.get("/actions/{action_id}", summary="Get quick action", description="""
 Get specific quick action details.
 """)
-async def get_action(action_id: int, db: AsyncSession = Depends(get_db)):
+async def get_action(
+    action_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Get a quick action"""
-    service = QuickActionsService(db)
+    service = QuickActionsService(db, current_user.id)
     action = await service.get_action(action_id)
 
     if not action:
@@ -177,10 +185,13 @@ Update a quick action.
 **Note:** Cannot modify preset actions, only custom ones.
 """)
 async def update_action(
-    action_id: int, update: QuickActionUpdate, db: AsyncSession = Depends(get_db)
+    action_id: int,
+    update: QuickActionUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Update a quick action"""
-    service = QuickActionsService(db)
+    service = QuickActionsService(db, current_user.id)
 
     updated = await service.update_action(
         action_id=action_id,
@@ -210,9 +221,13 @@ Delete a custom quick action.
 
 **Note:** Cannot delete preset actions.
 """)
-async def delete_action(action_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_action(
+    action_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Delete a quick action"""
-    service = QuickActionsService(db)
+    service = QuickActionsService(db, current_user.id)
     success = await service.delete_action(action_id)
 
     if not success:
@@ -240,9 +255,10 @@ async def execute_action(
     action_id: int,
     context: Optional[Dict[str, Any]] = Body(None),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Execute a quick action"""
-    service = QuickActionsService(db)
+    service = QuickActionsService(db, current_user.id)
     result = await service.execute_action(action_id=action_id, context=context)
 
     return result
@@ -278,9 +294,10 @@ async def execute_by_trigger(
     trigger: str = Body(..., embed=True),
     context: Optional[Dict[str, Any]] = Body(None),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Execute action by trigger phrase"""
-    service = QuickActionsService(db)
+    service = QuickActionsService(db, current_user.id)
     result = await service.execute_by_trigger(trigger=trigger, context=context)
 
     return result
@@ -297,9 +314,12 @@ Initialize default preset quick actions.
 
 **JARVIS use:** Called on first setup
 """)
-async def initialize_presets(db: AsyncSession = Depends(get_db)):
+async def initialize_presets(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Initialize preset quick actions"""
-    service = QuickActionsService(db)
+    service = QuickActionsService(db, current_user.id)
     await service.initialize_preset_actions()
 
     return {
@@ -335,10 +355,13 @@ Should I create a quick action 'monday_start' to automate this?"
 """)
 @limiter.limit(get_settings().rate_limit_llm)
 async def suggest_action(
-    request: Request, user_behavior: Dict[str, Any] = Body(...), db: AsyncSession = Depends(get_db)
+    request: Request,
+    user_behavior: Dict[str, Any] = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get AI suggestion for custom action"""
-    service = QuickActionsService(db)
+    service = QuickActionsService(db, current_user.id)
     suggestion = await service.suggest_custom_action(user_behavior)
 
     if not suggestion:

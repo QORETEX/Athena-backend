@@ -11,37 +11,27 @@ from app.skills.reminders import handle_set_reminder
 
 
 @pytest.mark.asyncio
-async def test_set_reminder_accepts_valid_iso_with_offset():
+async def test_set_reminder_accepts_valid_iso_with_offset(skill_runner):
     """A well-formed ISO 8601 datetime with UTC offset must succeed."""
-    mock_reminder = MagicMock()
-    mock_reminder.id = 42
-
     mock_session_cm = MagicMock()
-    mock_session_cm.__aenter__ = AsyncMock(return_value=MagicMock(
-        add=MagicMock(),
-        commit=AsyncMock(),
-        refresh=AsyncMock(),
-    ))
+    session_obj = MagicMock()
+    session_obj.add = MagicMock()
+    session_obj.commit = AsyncMock()
+
+    async def _refresh(obj):
+        obj.id = 42
+
+    session_obj.refresh = _refresh
+    mock_session_cm.__aenter__ = AsyncMock(return_value=session_obj)
     mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
     with (
         patch("app.skills.reminders.async_session", return_value=mock_session_cm),
         patch("app.skills.reminders.schedule_reminder", create=True),
     ):
-        # Patch the session to make refresh populate reminder.id
-        session_obj = MagicMock()
-        session_obj.add = MagicMock()
-        session_obj.commit = AsyncMock()
-
-        async def _refresh(obj):
-            obj.id = 42
-
-        session_obj.refresh = _refresh
-        mock_session_cm.__aenter__ = AsyncMock(return_value=session_obj)
-
-        result = await handle_set_reminder(
-            text="Test this tomorrow",
-            time="2026-09-30T07:00:00+00:00",
+        result = await skill_runner(
+            handle_set_reminder(text="Test this tomorrow", time="2026-09-30T07:00:00+00:00"),
+            user_id=1,
         )
 
     assert result.get("success") is True
@@ -51,7 +41,7 @@ async def test_set_reminder_accepts_valid_iso_with_offset():
 
 
 @pytest.mark.asyncio
-async def test_set_reminder_accepts_positive_offset():
+async def test_set_reminder_accepts_positive_offset(skill_runner):
     """A datetime with a positive UTC offset (e.g. +05:00) must succeed."""
     mock_session_cm = MagicMock()
     session_obj = MagicMock()
@@ -66,9 +56,9 @@ async def test_set_reminder_accepts_positive_offset():
     mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
     with patch("app.skills.reminders.async_session", return_value=mock_session_cm):
-        result = await handle_set_reminder(
-            text="Morning standup",
-            time="2026-10-02T09:00:00+05:00",
+        result = await skill_runner(
+            handle_set_reminder(text="Morning standup", time="2026-10-02T09:00:00+05:00"),
+            user_id=1,
         )
 
     assert result.get("success") is True
@@ -78,9 +68,12 @@ async def test_set_reminder_accepts_positive_offset():
 
 
 @pytest.mark.asyncio
-async def test_set_reminder_rejects_natural_language():
+async def test_set_reminder_rejects_natural_language(skill_runner):
     """Natural language like 'tomorrow at 7am' must be rejected with a clear error."""
-    result = await handle_set_reminder(text="Test", time="tomorrow at 7am")
+    result = await skill_runner(
+        handle_set_reminder(text="Test", time="tomorrow at 7am"),
+        user_id=1,
+    )
 
     assert result.get("success") is False
     error = result.get("error", "")
@@ -89,9 +82,12 @@ async def test_set_reminder_rejects_natural_language():
 
 
 @pytest.mark.asyncio
-async def test_set_reminder_rejects_naive_datetime():
+async def test_set_reminder_rejects_naive_datetime(skill_runner):
     """ISO 8601 without a UTC offset must be rejected (naive datetime)."""
-    result = await handle_set_reminder(text="Test", time="2026-09-30T07:00:00")
+    result = await skill_runner(
+        handle_set_reminder(text="Test", time="2026-09-30T07:00:00"),
+        user_id=1,
+    )
 
     assert result.get("success") is False
     error = result.get("error", "")
@@ -99,27 +95,35 @@ async def test_set_reminder_rejects_naive_datetime():
 
 
 @pytest.mark.asyncio
-async def test_set_reminder_rejects_date_only():
+async def test_set_reminder_rejects_date_only(skill_runner):
     """A date-only string like '2026-09-30' must be rejected."""
-    result = await handle_set_reminder(text="Test", time="2026-09-30")
+    result = await skill_runner(
+        handle_set_reminder(text="Test", time="2026-09-30"),
+        user_id=1,
+    )
 
     assert result.get("success") is False
 
 
 @pytest.mark.asyncio
-async def test_set_reminder_rejects_relative_expressions():
+async def test_set_reminder_rejects_relative_expressions(skill_runner):
     """Relative expressions like 'next Monday' must be rejected."""
     for bad_input in ("next Monday", "next Monday at 8am", "Friday at 9am", "3 days from now"):
-        result = await handle_set_reminder(text="Test", time=bad_input)
+        result = await skill_runner(
+            handle_set_reminder(text="Test", time=bad_input),
+            user_id=1,
+        )
         assert result.get("success") is False, f"Should have rejected {bad_input!r}"
 
 
 @pytest.mark.asyncio
-async def test_set_reminder_error_message_includes_example():
+async def test_set_reminder_error_message_includes_example(skill_runner):
     """Error message must include a concrete ISO 8601 example."""
-    result = await handle_set_reminder(text="Test", time="tomorrow at 7am")
+    result = await skill_runner(
+        handle_set_reminder(text="Test", time="tomorrow at 7am"),
+        user_id=1,
+    )
     error = result.get("error", "")
-    # Must include the example format
     assert "2026-" in error or "e.g." in error or "+00:00" in error
 
 

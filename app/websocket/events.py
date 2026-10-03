@@ -88,12 +88,14 @@ async def events_endpoint(ws: WebSocket):
 # ── Broadcast helpers ─────────────────────────────────────
 
 
-async def broadcast_event(msg_type: MessageType, payload: dict):
+async def broadcast_event(msg_type: MessageType, payload: dict, user_id: int | None = None):
     if not _event_clients:
         return
     dead: set[WebSocket] = set()
     message = {"type": msg_type.value, "payload": payload}
     for ws in _event_clients:
+        if user_id is not None and getattr(ws.state, "user_id", None) != user_id:
+            continue
         try:
             await ws.send_json(message)
         except Exception:
@@ -119,6 +121,7 @@ async def push_notification(
     title: str,
     body: str = "",
     data: Optional[dict] = None,
+    user_id: int | None = None,
 ) -> int:
     """Store a notification in the database and broadcast it to connected clients."""
     from app.db import NotificationLog, async_session
@@ -128,6 +131,7 @@ async def push_notification(
     if async_session is not None:
         async with async_session() as session:
             notif = NotificationLog(
+                user_id=user_id,
                 event_type=event_type,
                 priority=priority,
                 title=title,

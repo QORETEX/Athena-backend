@@ -10,7 +10,8 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import Routine, get_db
+from app.auth.dependencies import get_current_user
+from app.db import Routine, User, get_db, get_owned_or_none
 from app.routines.engine import (
     execute_routine,
     register_routine,
@@ -100,8 +101,9 @@ def _routine_to_response(routine: Routine) -> RoutineResponse:
 async def list_routines(
     enabled_only: bool = False,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    stmt = select(Routine).order_by(Routine.name)
+    stmt = select(Routine).where(Routine.user_id == current_user.id).order_by(Routine.name)
     if enabled_only:
         stmt = stmt.where(Routine.enabled == True)  # noqa: E712
     result = await db.execute(stmt)
@@ -109,8 +111,13 @@ async def list_routines(
 
 
 @router.post("/", response_model=RoutineResponse, status_code=201)
-async def create_routine(body: RoutineCreate, db: AsyncSession = Depends(get_db)):
+async def create_routine(
+    body: RoutineCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     routine = Routine(
+        user_id=current_user.id,
         name=body.name,
         description=body.description,
         trigger_type=body.trigger_type,
@@ -129,8 +136,12 @@ async def create_routine(body: RoutineCreate, db: AsyncSession = Depends(get_db)
 
 
 @router.get("/{routine_id}", response_model=RoutineResponse)
-async def get_routine(routine_id: int, db: AsyncSession = Depends(get_db)):
-    routine = await db.get(Routine, routine_id)
+async def get_routine(
+    routine_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    routine = await get_owned_or_none(db, Routine, routine_id, current_user.id)
     if not routine:
         raise HTTPException(status_code=404, detail="Routine not found")
     return _routine_to_response(routine)
@@ -141,8 +152,9 @@ async def update_routine(
     routine_id: int,
     body: RoutineUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    routine = await db.get(Routine, routine_id)
+    routine = await get_owned_or_none(db, Routine, routine_id, current_user.id)
     if not routine:
         raise HTTPException(status_code=404, detail="Routine not found")
 
@@ -170,8 +182,12 @@ async def update_routine(
 
 
 @router.delete("/{routine_id}", status_code=204)
-async def delete_routine(routine_id: int, db: AsyncSession = Depends(get_db)):
-    routine = await db.get(Routine, routine_id)
+async def delete_routine(
+    routine_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    routine = await get_owned_or_none(db, Routine, routine_id, current_user.id)
     if not routine:
         raise HTTPException(status_code=404, detail="Routine not found")
     unregister_routine(routine_id)
@@ -179,9 +195,13 @@ async def delete_routine(routine_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{routine_id}/trigger")
-async def trigger_routine(routine_id: int, db: AsyncSession = Depends(get_db)):
+async def trigger_routine(
+    routine_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Manually trigger a routine regardless of its schedule."""
-    routine = await db.get(Routine, routine_id)
+    routine = await get_owned_or_none(db, Routine, routine_id, current_user.id)
     if not routine:
         raise HTTPException(status_code=404, detail="Routine not found")
 

@@ -18,8 +18,9 @@ logger = logging.getLogger(__name__)
 class RelationshipService:
     """Service for managing contacts and relationship intelligence"""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, user_id: int):
         self.db = db
+        self.user_id = user_id
 
     async def create_contact(
         self,
@@ -32,6 +33,7 @@ class RelationshipService:
     ) -> Contact:
         """Create a new contact"""
         contact = Contact(
+            user_id=self.user_id,
             name=name,
             email=email,
             phone=phone,
@@ -50,7 +52,9 @@ class RelationshipService:
         self, relationship_type: Optional[str] = None
     ) -> List[Contact]:
         """Get all contacts, optionally filtered by relationship type"""
-        query = select(Contact).order_by(Contact.relationship_strength.desc())
+        query = select(Contact).where(
+            Contact.user_id == self.user_id
+        ).order_by(Contact.relationship_strength.desc())
 
         if relationship_type:
             query = query.where(Contact.relationship == relationship_type)
@@ -61,7 +65,7 @@ class RelationshipService:
     async def get_contact(self, contact_id: int) -> Optional[Contact]:
         """Get a specific contact"""
         result = await self.db.execute(
-            select(Contact).where(Contact.id == contact_id)
+            select(Contact).where(Contact.id == contact_id, Contact.user_id == self.user_id)
         )
         return result.scalar_one_or_none()
 
@@ -328,9 +332,10 @@ Provide a 1-2 sentence suggestion for what to say or ask about. Be warm and natu
         # Simple case-insensitive search
         result = await self.db.execute(
             select(Contact).where(
+                Contact.user_id == self.user_id,
                 (Contact.name.ilike(f"%{query}%"))
                 | (Contact.email.ilike(f"%{query}%"))
-                | (Contact.notes.ilike(f"%{query}%"))
+                | (Contact.notes.ilike(f"%{query}%")),
             )
         )
         return list(result.scalars().all())

@@ -8,6 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import Reminder, get_db
+from app.db import User, get_owned_or_none
+from app.auth.dependencies import get_current_user
 from app.schemas import ReminderResponse
 
 router = APIRouter(prefix="/api/reminders", tags=["reminders"])
@@ -28,8 +30,9 @@ class ReminderUpdate(BaseModel):
 async def list_reminders(
     completed: bool | None = None,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    stmt = select(Reminder).order_by(Reminder.remind_at)
+    stmt = select(Reminder).where(Reminder.user_id == current_user.id).order_by(Reminder.remind_at)
     if completed is not None:
         stmt = stmt.where(Reminder.completed == completed)
     result = await db.execute(stmt)
@@ -47,8 +50,8 @@ async def list_reminders(
 
 
 @router.post("", response_model=ReminderResponse, status_code=201)
-async def create_reminder(body: ReminderCreate, db: AsyncSession = Depends(get_db)):
-    reminder = Reminder(text=body.text, remind_at=body.remind_at)
+async def create_reminder(body: ReminderCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    reminder = Reminder(user_id=current_user.id, text=body.text, remind_at=body.remind_at)
     db.add(reminder)
     await db.flush()
     await db.refresh(reminder)
@@ -56,7 +59,7 @@ async def create_reminder(body: ReminderCreate, db: AsyncSession = Depends(get_d
     try:
         from app.scheduler import schedule_reminder
 
-        schedule_reminder(reminder.id, reminder.remind_at, reminder.text)
+        schedule_reminder(reminder.id, reminder.remind_at, reminder.text, current_user.id)
     except Exception:
         pass
 
@@ -74,8 +77,9 @@ async def update_reminder(
     reminder_id: int,
     body: ReminderUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    reminder = await db.get(Reminder, reminder_id)
+    reminder = await get_owned_or_none(db, Reminder, reminder_id, current_user.id)
     if not reminder:
         raise HTTPException(status_code=404, detail="Reminder not found")
 
@@ -102,8 +106,9 @@ async def update_reminder(
 async def delete_reminder(
     reminder_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    reminder = await db.get(Reminder, reminder_id)
+    reminder = await get_owned_or_none(db, Reminder, reminder_id, current_user.id)
     if not reminder:
         raise HTTPException(status_code=404, detail="Reminder not found")
     await db.delete(reminder)
