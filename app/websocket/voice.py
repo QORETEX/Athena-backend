@@ -342,7 +342,7 @@ async def process_utterance(
                 result.reply, {"role": "assistant", "type": "conversation"}
             )
 
-        await _log_conversation(transcript, result.reply, result.tool_calls or None)
+        await _log_conversation(transcript, result.reply, result.tool_calls or None, user_id=user_id)
 
     except asyncio.CancelledError:
         logger.info("Pipeline cancelled (barge-in)")
@@ -360,7 +360,10 @@ async def _log_conversation(
     transcript: str,
     assistant_text: str,
     tool_calls: list | None,
+    user_id: int | None = None,
 ):
+    if user_id is None:
+        return
     try:
         from app.db import ConversationLog, async_session
 
@@ -371,6 +374,7 @@ async def _log_conversation(
             now = datetime.now(timezone.utc)
             session.add(
                 ConversationLog(
+                    user_id=user_id,
                     timestamp=now,
                     role="user",
                     content=transcript,
@@ -378,6 +382,7 @@ async def _log_conversation(
             )
             session.add(
                 ConversationLog(
+                    user_id=user_id,
                     timestamp=now,
                     role="assistant",
                     content=assistant_text,

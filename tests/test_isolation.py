@@ -21,6 +21,7 @@ from app.db import (
     ConversationLog,
     FocusSession,
     JournalEntry,
+    LongTermMemory,
     Note,
     NotificationLog,
     QuickAction,
@@ -28,6 +29,7 @@ from app.db import (
     Routine,
     SmartHomeDevice,
     UserKnowledge,
+    UserPattern,
     UserPreference,
 )
 
@@ -52,6 +54,8 @@ COVERED: frozenset[str] = frozenset(
         "/api/learning",
         "/api/journal",
         "/api/smart-home",
+        "/api/patterns",
+        "/api/memory-enhanced",
     }
 )
 
@@ -73,8 +77,6 @@ EXEMPT: dict[str, str] = {
     "/api/calendar": "Google Calendar sync (OAuth); requires external credentials",
     "/api/push": "device-token management; no list endpoint to verify isolation",
     "/api/knowledge": "ChromaDB knowledge base; not available in test env",
-    "/api/patterns": "pattern service bypasses DI; handlers have no user context",
-    "/api/memory-enhanced": "LTM service bypasses DI; handlers have no user context",
     "/api/_test_access_log_500": "test-only route added to the app by tests/test_access_log.py; no user data",
     "/api/_test_access_log_ok": "test-only route added to the app by tests/test_access_log.py; no user data",
 }
@@ -289,13 +291,30 @@ async def test_focus_isolation(user_a, user_b, client_a, client_b, test_db):
     await test_db.commit()
     await test_db.refresh(row)
 
+    # ── List isolation ─────────────────────────────────────────────────────────
     resp_b = client_b.get("/api/focus/sessions")
     assert resp_b.status_code == 200
-    # Response shape: {"days": N, "count": N, "sessions": [...]}
     sessions_b = resp_b.json().get("sessions", [])
     ids_b = [r["id"] for r in sessions_b]
     assert row.id not in ids_b, "B can see A's focus session (isolation violation)"
 
+    # ── By-ID isolation: end, notification-held, interruption ─────────────────
+    # B must not be able to end A's session
+    assert client_b.post(
+        f"/api/focus/{row.id}/end", json={}
+    ).status_code == 404, "B ended A's focus session (isolation violation)"
+
+    # B must not be able to increment held-notification count on A's session
+    assert client_b.post(
+        f"/api/focus/{row.id}/notification-held"
+    ).status_code == 404, "B incremented A's notification-held count (isolation violation)"
+
+    # B must not be able to record an interruption on A's session
+    assert client_b.post(
+        f"/api/focus/{row.id}/interruption"
+    ).status_code == 404, "B recorded interruption on A's session (isolation violation)"
+
+    # ── A's row is unchanged and accessible ────────────────────────────────────
     resp_a = client_a.get("/api/focus/sessions")
     assert resp_a.status_code == 200
     sessions_a = resp_a.json().get("sessions", [])
@@ -456,6 +475,7 @@ async def test_learning_isolation(user_a, user_b, client_a, client_b, test_db):
     await test_db.commit()
     await test_db.refresh(row)
 
+    # ── List isolation ─────────────────────────────────────────────────────────
     resp_b = client_b.get("/api/learning/knowledge")
     assert resp_b.status_code == 200
     data_b = resp_b.json()
@@ -463,14 +483,97 @@ async def test_learning_isolation(user_a, user_b, client_a, client_b, test_db):
     ids_b = [i.get("id") for i in items_b if isinstance(i, dict)]
     assert row.id not in ids_b, "B can see A's learning item (isolation violation)"
 
+    # ── By-ID isolation ────────────────────────────────────────────────────────
+    # B must not access A's knowledge by category/key
+    assert client_b.get(
+        f"/api/learning/knowledge/preference/iso_learn_color"
+    ).status_code == 404, "B can GET A's knowledge by category/key (isolation violation)"
+
+    # B must not delete A's knowledge by ID
     assert client_b.delete(f"/api/learning/knowledge/{row.id}").status_code == 404
 
+    # ── A's row is unchanged ───────────────────────────────────────────────────
     resp_a = client_a.get("/api/learning/knowledge")
     assert resp_a.status_code == 200
     data_a = resp_a.json()
     items_a = data_a if isinstance(data_a, list) else data_a.get("knowledge", data_a.get("items", []))
     ids_a = [i.get("id") for i in items_a if isinstance(i, dict)]
     assert row.id in ids_a, "A's learning item disappeared"
+
+    # A can still access by category/key
+    resp_a_by_key = client_a.get("/api/learning/knowledge/preference/iso_learn_color")
+    assert resp_a_by_key.status_code == 200, "A cannot access their own knowledge by category/key"
+
+
+@pytest.mark.asyncio
+async def test_patterns_isolation(user_a, user_b, client_a, client_b, test_db):
+    row = UserPattern(
+        user_id=user_a["id"],
+        pattern_type="iso_test_type",
+        pattern_key="iso_test_key",
+        pattern_value="A's secret pattern value",
+        confidence=0.8,
+    )
+    test_db.add(row)
+    await test_db.commit()
+    await test_db.refresh(row)
+
+    # ── List isolation ─────────────────────────────────────────────────────────
+    resp_b = client_b.get("/api/patterns/all")
+    assert resp_b.status_code == 200
+    patterns_b = resp_b.json().get("patterns", [])
+    keys_b = [p.get("key") for p in patterns_b]
+    assert "iso_test_key" not in keys_b, "B can see A's pattern in list (isolation violation)"
+
+    # ── By-ID isolation: get by type+key ──────────────────────────────────────
+    resp = client_b.get("/api/patterns/iso_test_type/iso_test_key")
+    assert resp.status_code == 404, (
+        f"B can access A's pattern by type/key (isolation violation), status {resp.status_code}"
+    )
+
+    # ── A's row is unchanged and accessible ────────────────────────────────────
+    resp_a = client_a.get("/api/patterns/iso_test_type/iso_test_key")
+    assert resp_a.status_code == 200, "A cannot access their own pattern"
+    assert resp_a.json().get("value") == "A's secret pattern value", "A's pattern value changed"
+
+
+@pytest.mark.asyncio
+async def test_memory_enhanced_isolation(user_a, user_b, client_a, client_b, test_db):
+    row = LongTermMemory(
+        user_id=user_a["id"],
+        content="A's secret long-term memory iso_ltm_unique_key",
+        memory_type="fact",
+        importance=0.9,
+    )
+    test_db.add(row)
+    await test_db.commit()
+    await test_db.refresh(row)
+
+    # ── Recall isolation: B's search must not return A's memory ───────────────
+    resp_b = client_b.post(
+        "/api/memory-enhanced/recall",
+        json={"query": "iso_ltm_unique_key", "limit": 10},
+    )
+    assert resp_b.status_code == 200
+    memories_b = resp_b.json().get("memories", [])
+    ids_b = [m["id"] for m in memories_b]
+    assert row.id not in ids_b, "B can recall A's long-term memory (isolation violation)"
+
+    # ── By-ID isolation: B deleting A's memory must return 404 ────────────────
+    resp_del = client_b.delete(f"/api/memory-enhanced/{row.id}")
+    assert resp_del.status_code == 404, (
+        f"B deleted A's memory (isolation violation), status {resp_del.status_code}"
+    )
+
+    # ── A's row is unchanged and accessible ────────────────────────────────────
+    resp_a = client_a.post(
+        "/api/memory-enhanced/recall",
+        json={"query": "iso_ltm_unique_key", "limit": 10},
+    )
+    assert resp_a.status_code == 200
+    memories_a = resp_a.json().get("memories", [])
+    ids_a = [m["id"] for m in memories_a]
+    assert row.id in ids_a, "A's long-term memory disappeared"
 
 
 # ── Route coverage check ──────────────────────────────────────────────────────
