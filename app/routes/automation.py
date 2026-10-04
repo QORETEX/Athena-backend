@@ -7,11 +7,14 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db
+from app.auth.dependencies import get_current_user
+from app.config import get_settings
+from app.db import User, get_db
+from app.rate_limit import limiter
 from app.services.automation_service import AutomationService
 
 logger = logging.getLogger(__name__)
@@ -81,10 +84,12 @@ Automatically executes rules when conditions match, creating a truly automated a
 "Every Monday at 8 AM, prepare weekly briefing"
 """)
 async def create_rule(
-    rule: AutomationRuleCreate, db: AsyncSession = Depends(get_db)
+    rule: AutomationRuleCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Create a new automation rule"""
-    service = AutomationService(db)
+    service = AutomationService(db, current_user.id)
 
     created_rule = await service.create_rule(
         name=rule.name,
@@ -115,9 +120,13 @@ Get all automation rules.
 
 **JARVIS use:** Displays active automations to user
 """)
-async def list_rules(enabled_only: bool = False, db: AsyncSession = Depends(get_db)):
+async def list_rules(
+    enabled_only: bool = False,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """List all automation rules"""
-    service = AutomationService(db)
+    service = AutomationService(db, current_user.id)
     rules = await service.get_all_rules(enabled_only=enabled_only)
 
     import json
@@ -146,9 +155,13 @@ Get specific automation rule details.
 
 **Returns:** Full rule definition with execution history
 """)
-async def get_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
+async def get_rule(
+    rule_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Get a specific automation rule"""
-    service = AutomationService(db)
+    service = AutomationService(db, current_user.id)
     rule = await service.get_rule(rule_id)
 
     if not rule:
@@ -187,10 +200,13 @@ Update an existing automation rule.
 **JARVIS use:** Allows user to modify or disable automation rules
 """)
 async def update_rule(
-    rule_id: int, update: AutomationRuleUpdate, db: AsyncSession = Depends(get_db)
+    rule_id: int,
+    update: AutomationRuleUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Update an automation rule"""
-    service = AutomationService(db)
+    service = AutomationService(db, current_user.id)
 
     updated_rule = await service.update_rule(
         rule_id=rule_id,
@@ -223,9 +239,13 @@ Delete an automation rule permanently.
 
 **JARVIS use:** Removes unwanted automation
 """)
-async def delete_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_rule(
+    rule_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Delete an automation rule"""
-    service = AutomationService(db)
+    service = AutomationService(db, current_user.id)
     success = await service.delete_rule(rule_id)
 
     if not success:
@@ -256,9 +276,13 @@ Check all enabled rules against current context and execute matching ones.
 
 **JARVIS use:** Called periodically by JARVIS brain to check and execute automation rules
 """)
-async def evaluate_rules(input: ContextInput, db: AsyncSession = Depends(get_db)):
+async def evaluate_rules(
+    input: ContextInput,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Evaluate all rules against current context"""
-    service = AutomationService(db)
+    service = AutomationService(db, current_user.id)
     executed = await service.check_and_execute_rules(input.context)
 
     return {
@@ -293,13 +317,16 @@ AI-powered automation suggestions based on user patterns.
 **JARVIS use:** Proactively suggests useful automations
 "Sir, I noticed you always do X when Y. Should I automate this?"
 """)
+@limiter.limit(get_settings().rate_limit_llm)
 async def suggest_automation(
+    request: Request,
     pattern: Dict[str, Any] = Body(...),
     context: Dict[str, Any] = Body(...),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get AI suggestion for automation"""
-    service = AutomationService(db)
+    service = AutomationService(db, current_user.id)
     suggestion = await service.suggest_automation(pattern, context)
 
     if not suggestion:

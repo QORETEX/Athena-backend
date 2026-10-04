@@ -1,8 +1,11 @@
 from app.skills.base import Skill, register_skill
 
+_ISO_OFFSET_NOTE = "ISO 8601 datetime with UTC offset, e.g. 2026-09-30T07:00:00+00:00"
+
 register_skill(
     Skill(
         name="create_calendar_event",
+        summary="Create a calendar event",
         description="Create a new event on the user's device calendar. Confirm details with the user before creating.",
         parameters={
             "type": "object",
@@ -13,11 +16,11 @@ register_skill(
                 },
                 "start_time": {
                     "type": "string",
-                    "description": "Event start time in ISO 8601 format",
+                    "description": f"Event start time — {_ISO_OFFSET_NOTE}",
                 },
                 "end_time": {
                     "type": "string",
-                    "description": "Event end time in ISO 8601 format",
+                    "description": f"Event end time — {_ISO_OFFSET_NOTE}",
                 },
                 "location": {
                     "type": "string",
@@ -32,28 +35,31 @@ register_skill(
         },
         handler=None,
         client_executed=True,
+        returns_external_content=True,
     )
 )
 
 register_skill(
     Skill(
         name="list_calendar_events",
+        summary="List upcoming calendar events",
         description="List upcoming events from the user's device calendar.",
         parameters={
             "type": "object",
             "properties": {
                 "start_date": {
                     "type": "string",
-                    "description": "Start of date range (ISO 8601)",
+                    "description": f"Start of date range — {_ISO_OFFSET_NOTE}",
                 },
                 "end_date": {
                     "type": "string",
-                    "description": "End of date range (ISO 8601)",
+                    "description": f"End of date range — {_ISO_OFFSET_NOTE}",
                 },
             },
             "required": ["start_date", "end_date"],
         },
         handler=None,
         client_executed=True,
+        returns_external_content=True,
     )
 )

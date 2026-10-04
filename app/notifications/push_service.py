@@ -3,6 +3,7 @@ Expo Push Notification Service for JARVIS Proactive Alerts
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Optional
@@ -138,8 +139,8 @@ class ExpoPushService:
                 channel_id="jarvis-alerts"  # Android notification channel
             )
 
-            # Send
-            response = self.client.publish(message)
+            # Wrap the synchronous Expo SDK call so it doesn't block the event loop
+            response = await asyncio.to_thread(self.client.publish, message)
 
             logger.info(f"Push notification sent: {title} (token: {token[:20]}...)")
             return {"status": "ok", "response": str(response)}

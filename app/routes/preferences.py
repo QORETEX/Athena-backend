@@ -5,11 +5,12 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import UserPreference, get_db
+from app.auth.dependencies import get_current_user
+from app.db import UserPreference, User, get_db
 
 logger = logging.getLogger(__name__)
 
@@ -37,27 +38,33 @@ class PreferenceUpdate(BaseModel):
 
 
 class PreferenceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     key: str
     value: str
-
-    class Config:
-        from_attributes = True
 
 
 # ── Routes ────────────────────────────────────────────────
 
 
 @router.get("/")
-async def list_preferences(db: AsyncSession = Depends(get_db)):
+async def list_preferences(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Return all preferences as a flat key-value dict."""
-    result = await db.execute(select(UserPreference))
+    result = await db.execute(
+        select(UserPreference).where(UserPreference.user_id == current_user.id)
+    )
     prefs = {row.key: row.value for row in result.scalars().all()}
     return prefs
 
 
 @router.put("/")
 async def update_preferences(
-    body: PreferenceUpdate, db: AsyncSession = Depends(get_db)
+    body: PreferenceUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Upsert one or more preferences. Accepts a dict of key-value pairs."""
     now = datetime.now(timezone.utc)
@@ -69,7 +76,10 @@ async def update_preferences(
             continue
 
         result = await db.execute(
-            select(UserPreference).where(UserPreference.key == key)
+            select(UserPreference).where(
+                UserPreference.user_id == current_user.id,
+                UserPreference.key == key,
+            )
         )
         existing = result.scalar_one_or_none()
 
@@ -77,7 +87,7 @@ async def update_preferences(
             existing.value = str(value)
             existing.updated_at = now
         else:
-            pref = UserPreference(key=key, value=str(value), updated_at=now)
+            pref = UserPreference(user_id=current_user.id, key=key, value=str(value), updated_at=now)
             db.add(pref)
 
         updated[key] = str(value)
@@ -87,10 +97,17 @@ async def update_preferences(
 
 
 @router.get("/{key}")
-async def get_preference(key: str, db: AsyncSession = Depends(get_db)):
+async def get_preference(
+    key: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Get a single preference by key."""
     result = await db.execute(
-        select(UserPreference).where(UserPreference.key == key.strip().lower())
+        select(UserPreference).where(
+            UserPreference.user_id == current_user.id,
+            UserPreference.key == key.strip().lower(),
+        )
     )
     pref = result.scalar_one_or_none()
     if not pref:
@@ -99,10 +116,17 @@ async def get_preference(key: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/{key}", status_code=204)
-async def delete_preference(key: str, db: AsyncSession = Depends(get_db)):
+async def delete_preference(
+    key: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Delete a single preference."""
     result = await db.execute(
-        select(UserPreference).where(UserPreference.key == key.strip().lower())
+        select(UserPreference).where(
+            UserPreference.user_id == current_user.id,
+            UserPreference.key == key.strip().lower(),
+        )
     )
     pref = result.scalar_one_or_none()
     if not pref:

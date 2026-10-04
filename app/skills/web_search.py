@@ -2,6 +2,7 @@ import logging
 
 import httpx
 
+from app.availability import is_reachable, mark_unreachable
 from app.config import get_settings
 from app.skills.base import Skill, register_skill
 
@@ -10,6 +11,12 @@ logger = logging.getLogger(__name__)
 
 async def handle_web_search(query: str) -> dict:
     settings = get_settings()
+
+    if not settings.web_search_enabled:
+        return {
+            "error": "Web search is not configured — set SEARXNG_URL in .env",
+            "query": query,
+        }
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -20,6 +27,7 @@ async def handle_web_search(query: str) -> dict:
             resp.raise_for_status()
             data = resp.json()
     except httpx.ConnectError:
+        mark_unreachable("web_search")
         return {
             "error": f"Cannot connect to SearXNG at {settings.searxng_url}. Is it running?",
             "query": query,
@@ -46,7 +54,8 @@ async def handle_web_search(query: str) -> dict:
 register_skill(
     Skill(
         name="web_search",
-        description="Search the web for current information using SearXNG. Use this when the user asks about recent events, news, or anything that requires up-to-date information.",
+        summary="Search the web",
+        description="Search the web for current information. Use this when the user asks about recent events, news, or anything that requires up-to-date information.",
         parameters={
             "type": "object",
             "properties": {
@@ -59,5 +68,13 @@ register_skill(
         },
         handler=handle_web_search,
         timeout=20,
+        returns_external_content=True,
+        # Offered only when SearXNG is configured AND reachable.
+        enabled_check=lambda: get_settings().web_search_enabled and is_reachable("web_search"),
+        unavailable_reason=lambda: (
+            "SEARXNG_URL not set"
+            if not get_settings().web_search_enabled
+            else "SearXNG not reachable (will retry in 5 min)"
+        ),
     )
 )

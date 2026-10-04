@@ -4,24 +4,27 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db import (
     BackgroundTask,
     Reminder,
     SmartHomeDevice,
     get_db,
 )
-from app.skills.base import Skill, register_skill
+from app.auth.dependencies import get_current_user
+from app.db import User
+from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/briefing", tags=["briefing"])
 
 
-async def generate_briefing(db: Optional[AsyncSession] = None) -> dict:
+async def generate_briefing(db: Optional[AsyncSession] = None, user_id: int | None = None) -> dict:
     """Generate a comprehensive briefing. Can be called from routes or routines."""
     from app.db import async_session as session_factory
 
@@ -65,6 +68,7 @@ async def generate_briefing(db: Optional[AsyncSession] = None) -> dict:
                 result = await db.execute(
                     select(Reminder).where(
                         and_(
+                            Reminder.user_id == user_id,
                             Reminder.completed == False,
                             Reminder.remind_at >= start_of_day,
                             Reminder.remind_at < end_of_day,
@@ -86,7 +90,7 @@ async def generate_briefing(db: Optional[AsyncSession] = None) -> dict:
             # ── Smart home devices ─────────────────────────
             try:
                 result = await db.execute(
-                    select(SmartHomeDevice).order_by(SmartHomeDevice.room, SmartHomeDevice.name)
+                    select(SmartHomeDevice).where(SmartHomeDevice.user_id == user_id).order_by(SmartHomeDevice.room, SmartHomeDevice.name)
                 )
                 devices = result.scalars().all()
                 briefing["devices"] = [
@@ -105,6 +109,7 @@ async def generate_briefing(db: Optional[AsyncSession] = None) -> dict:
             try:
                 result = await db.execute(
                     select(BackgroundTask).where(
+                        BackgroundTask.user_id == user_id,
                         BackgroundTask.status.in_(["pending", "running"])
                     )
                 )
@@ -165,15 +170,16 @@ async def generate_briefing(db: Optional[AsyncSession] = None) -> dict:
 
 
 @router.get("/")
-async def get_briefing(db: AsyncSession = Depends(get_db)):
+async def get_briefing(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Generate a comprehensive daily briefing."""
-    return await generate_briefing(db=db)
+    return await generate_briefing(db=db, user_id=current_user.id)
 
 
 @router.get("/summary")
-async def get_briefing_summary(db: AsyncSession = Depends(get_db)):
+@limiter.limit(get_settings().rate_limit_llm)
+async def get_briefing_summary(request: Request, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Generate a natural language summary of the briefing via Ollama."""
-    briefing = await generate_briefing(db=db)
+    briefing = await generate_briefing(db=db, user_id=current_user.id)
 
     try:
         from app.llm import chat_with_tools
@@ -231,28 +237,3 @@ async def get_briefing_summary(db: AsyncSession = Depends(get_db)):
             "briefing": briefing,
             "error": str(e),
         }
-
-
-# ── Skill registration ────────────────────────────────────
-
-
-async def handle_daily_briefing() -> dict:
-    return await generate_briefing()
-
-
-register_skill(
-    Skill(
-        name="daily_briefing",
-        description=(
-            "Generate and deliver a daily briefing covering weather, reminders, "
-            "smart home status, and system health. Use when the user asks for a "
-            "briefing, status update, or 'what's going on today'."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {},
-        },
-        handler=handle_daily_briefing,
-        timeout=30,
-    )
-)

@@ -9,7 +9,10 @@ from datetime import datetime, timezone
 import numpy as np
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from limits import parse as parse_rate_limit
+
 from app.config import get_settings
+from app.rate_limit import limiter
 from app.schemas import AssistantState, MessageType
 
 logger = logging.getLogger(__name__)
@@ -26,7 +29,7 @@ try:
     WHISPER_AVAILABLE = True
     logger.info("faster-whisper available")
 except ImportError:
-    logger.warning("faster-whisper not installed — STT disabled")
+    logger.info("faster-whisper not installed — STT disabled")
 
 try:
     from piper import PiperVoice
@@ -34,7 +37,7 @@ try:
     PIPER_AVAILABLE = True
     logger.info("piper-tts available")
 except ImportError:
-    logger.warning("piper-tts not installed — TTS disabled")
+    logger.info("piper-tts not installed — TTS disabled")
 
 try:
     import torch
@@ -42,7 +45,9 @@ try:
     VAD_AVAILABLE = True
     logger.info("torch available — VAD enabled")
 except ImportError:
-    logger.warning("torch not installed — VAD disabled, relying on client audio_end")
+    logger.info("torch not installed — VAD disabled, relying on client audio_end")
+
+from app.audio.denoise import denoise_audio  # noqa: E402 — must follow optional imports above
 
 # ── Lazy model singletons ───────────────────────────────────────────────────
 
@@ -107,7 +112,7 @@ async def set_state(ws: WebSocket, state: AssistantState):
 # ── VAD ──────────────────────────────────────────────────────────────────────
 
 
-def check_vad(audio_buffer: bytearray) -> bool:
+def check_vad(audio_buffer: bytes | bytearray) -> bool:
     if not VAD_AVAILABLE:
         return False
 
@@ -156,8 +161,6 @@ def transcribe_audio(audio_bytes: bytes) -> str:
     if model is None:
         return "[STT unavailable]"
 
-    from app.audio.denoise import denoise_audio
-
     cleaned = denoise_audio(audio_bytes)
 
     audio_np = np.frombuffer(cleaned, dtype=np.int16).astype(np.float32) / 32768.0
@@ -197,7 +200,14 @@ async def stream_tts(text: str, ws: WebSocket):
         return
 
     try:
-        raw_audio = await asyncio.to_thread(_synthesize_speech, text)
+        raw_audio = await asyncio.wait_for(
+            asyncio.to_thread(_synthesize_speech, text),
+            timeout=get_settings().tts_timeout,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("TTS synthesis timed out after %ds", get_settings().tts_timeout)
+        await send_msg(ws, MessageType.TTS_END, {})
+        return
     except Exception:
         logger.exception("TTS synthesis failed")
         await send_msg(ws, MessageType.TTS_END, {})
@@ -228,11 +238,21 @@ async def process_utterance(
     ws: WebSocket,
     session_history: list[dict],
     client_tool_futures: dict[str, asyncio.Future],
+    user_id: int | None = None,
 ):
     try:
         # 1. Transcribe
         await set_state(ws, AssistantState.TRANSCRIBING)
-        transcript = await asyncio.to_thread(transcribe_audio, audio_data)
+        try:
+            transcript = await asyncio.wait_for(
+                asyncio.to_thread(transcribe_audio, audio_data),
+                timeout=get_settings().stt_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("STT timed out after %ds", get_settings().stt_timeout)
+            await send_msg(ws, MessageType.ERROR, {"message": "Transcription timed out"})
+            await set_state(ws, AssistantState.IDLE)
+            return
 
         if not transcript or transcript == "[STT unavailable]":
             await send_msg(
@@ -243,116 +263,86 @@ async def process_utterance(
             if not transcript:
                 await set_state(ws, AssistantState.IDLE)
                 return
-            # Even if STT unavailable, continue so the user gets feedback
 
         await send_msg(ws, MessageType.FINAL_TRANSCRIPT, {"text": transcript})
 
         # 2. Think
         await set_state(ws, AssistantState.THINKING)
 
-        from app.llm import build_system_prompt, chat_with_tools
+        # Enforce the same per-IP LLM rate limit as HTTP routes
+        _rate_item = parse_rate_limit(get_settings().rate_limit_llm)
+        _client_ip = _get_ws_client_ip(ws)
+        if not limiter.limiter.hit(_rate_item, _client_ip):
+            await send_msg(ws, MessageType.ERROR, {
+                "message": "Rate limit exceeded. Please wait before sending another message."
+            })
+            await set_state(ws, AssistantState.IDLE)
+            return
+
+        # Guard: no provider configured
+        if not get_settings().any_llm_configured:
+            await send_msg(ws, MessageType.ERROR, {
+                "code": "no_llm_available",
+                "message": "No LLM provider is configured.",
+            })
+            await set_state(ws, AssistantState.IDLE)
+            return
+
+        # 3. Run shared pipeline with WS-specific callbacks
+        from app.chat.pipeline import run_chat_turn
         from app.memory.store import get_memory_store
-        from app.skills.base import get_ollama_tools, get_skill
 
-        memory_store = get_memory_store()
-        memory_context = None
-        if memory_store:
-            results = await memory_store.search(transcript, top_k=5)
-            if results:
-                memory_context = results
+        async def _on_tool_call(tool_name: str, args: dict) -> None:
+            await send_msg(ws, MessageType.TOOL_CALL, {"tool": tool_name, "args": args})
 
-        system_prompt = build_system_prompt(memory_context)
+        async def _on_tool_result(tool_name: str, result: dict) -> None:
+            await send_msg(ws, MessageType.TOOL_RESULT, {"tool": tool_name, "result": result})
 
-        messages = [{"role": "system", "content": system_prompt}]
-        messages.extend(session_history[-20:])
-        messages.append({"role": "user", "content": transcript})
+        result = await run_chat_turn(
+            transcript,
+            list(session_history),
+            client_capabilities=True,
+            user_id=user_id,
+            on_tool_call=_on_tool_call,
+            on_tool_result=_on_tool_result,
+            client_tool_futures=client_tool_futures,
+        )
 
-        tools = get_ollama_tools()
-        response = await chat_with_tools(messages, tools if tools else None)
+        if result.error == "llm_providers_failed":
+            await send_msg(ws, MessageType.ERROR, {
+                "code": "llm_providers_failed",
+                "message": result.reply,
+            })
+            await set_state(ws, AssistantState.IDLE)
+            return
 
-        assistant_message = response.get("message", {})
-
-        # 3. Handle tool calls
-        tool_calls = assistant_message.get("tool_calls")
-        if tool_calls:
-            for tc in tool_calls:
-                func = tc.get("function", {})
-                tool_name = func.get("name", "")
-                tool_args = func.get("arguments", {})
-
-                await send_msg(
-                    ws,
-                    MessageType.TOOL_CALL,
-                    {"tool": tool_name, "args": tool_args},
-                )
-
-                skill = get_skill(tool_name)
-                if skill is None:
-                    result = {"error": f"Unknown skill: {tool_name}"}
-                elif skill.client_executed:
-                    future: asyncio.Future = asyncio.get_running_loop().create_future()
-                    client_tool_futures[tool_name] = future
-                    try:
-                        result = await asyncio.wait_for(future, timeout=skill.timeout)
-                    except asyncio.TimeoutError:
-                        result = {"error": "Client did not respond in time"}
-                    finally:
-                        client_tool_futures.pop(tool_name, None)
-                elif skill.handler:
-                    try:
-                        handler_result = skill.handler(**tool_args)
-                        if asyncio.iscoroutine(handler_result):
-                            result = await asyncio.wait_for(
-                                handler_result, timeout=skill.timeout
-                            )
-                        else:
-                            result = handler_result
-                    except asyncio.TimeoutError:
-                        result = {"error": f"Skill '{tool_name}' timed out"}
-                    except Exception as e:
-                        logger.exception("Skill %s failed", tool_name)
-                        result = {"error": str(e)}
-                else:
-                    result = {"error": f"Skill '{tool_name}' has no handler"}
-
-                await send_msg(
-                    ws,
-                    MessageType.TOOL_RESULT,
-                    {"tool": tool_name, "result": result},
-                )
-
-                messages.append({"role": "tool", "content": json.dumps(result)})
-
-            response = await chat_with_tools(messages, tools if tools else None)
-            assistant_message = response.get("message", {})
-
-        # 4. Extract reply text
-        assistant_text = assistant_message.get("content", "")
-        await send_msg(ws, MessageType.ASSISTANT_TEXT, {"text": assistant_text})
+        # 4. Send reply text
+        await send_msg(ws, MessageType.ASSISTANT_TEXT, {"text": result.reply})
 
         # 5. TTS
         await set_state(ws, AssistantState.SPEAKING)
-        await stream_tts(assistant_text, ws)
+        await stream_tts(result.reply, ws)
 
         # 6. Done
         await set_state(ws, AssistantState.IDLE)
 
-        # 7. Update session history
+        # 7. Update session history (caller's list, not the copy we passed in)
         session_history.append({"role": "user", "content": transcript})
-        session_history.append({"role": "assistant", "content": assistant_text})
+        session_history.append({"role": "assistant", "content": result.reply})
         if len(session_history) > 40:
             session_history[:] = session_history[-40:]
 
         # 8. Persist to memory & conversation log
+        memory_store = get_memory_store()
         if memory_store:
             await memory_store.add_memory(
                 transcript, {"role": "user", "type": "conversation"}
             )
             await memory_store.add_memory(
-                assistant_text, {"role": "assistant", "type": "conversation"}
+                result.reply, {"role": "assistant", "type": "conversation"}
             )
 
-        await _log_conversation(transcript, assistant_text, tool_calls)
+        await _log_conversation(transcript, result.reply, result.tool_calls or None, user_id=user_id)
 
     except asyncio.CancelledError:
         logger.info("Pipeline cancelled (barge-in)")
@@ -370,7 +360,10 @@ async def _log_conversation(
     transcript: str,
     assistant_text: str,
     tool_calls: list | None,
+    user_id: int | None = None,
 ):
+    if user_id is None:
+        return
     try:
         from app.db import ConversationLog, async_session
 
@@ -381,6 +374,7 @@ async def _log_conversation(
             now = datetime.now(timezone.utc)
             session.add(
                 ConversationLog(
+                    user_id=user_id,
                     timestamp=now,
                     role="user",
                     content=transcript,
@@ -388,6 +382,7 @@ async def _log_conversation(
             )
             session.add(
                 ConversationLog(
+                    user_id=user_id,
                     timestamp=now,
                     role="assistant",
                     content=assistant_text,
@@ -403,25 +398,97 @@ async def _log_conversation(
 
 router = APIRouter()
 
+_WS_MAX_TEXT_BYTES = 64 * 1024  # 64 KB cap on individual text control messages
+
+# Per-IP concurrent connection tracking (asyncio is single-threaded; no lock needed)
+_ws_connections_per_ip: dict[str, int] = {}
+
+
+def _get_ws_client_ip(ws: WebSocket) -> str:
+    """Mirror of rate_limit.get_client_ip, adapted for WebSocket objects."""
+    settings = get_settings()
+    if settings.trust_proxy:
+        xff = ws.headers.get("x-forwarded-for", "")
+        if xff:
+            return xff.split(",")[-1].strip()
+    return (ws.client.host if ws.client else None) or "127.0.0.1"
+
 
 @router.websocket("/ws/voice")
 async def voice_endpoint(ws: WebSocket):
-    await ws.accept()
-    logger.info("Voice WebSocket connected")
+    client_ip = _get_ws_client_ip(ws)
+    settings = get_settings()
+    current_conns = _ws_connections_per_ip.get(client_ip, 0)
+    if current_conns >= settings.ws_max_conn_per_ip:
+        # Must accept before closing per the WebSocket protocol
+        await ws.accept()
+        await ws.close(code=1008)  # 1008 = Policy Violation
+        return
+    _ws_connections_per_ip[client_ip] = current_conns + 1
 
-    audio_buffer = bytearray()
-    session_history: list[dict] = []
+    # Initialize before try so finally can always reference them
     current_task: asyncio.Task | None = None
     client_tool_futures: dict[str, asyncio.Future] = {}
 
     try:
+        await ws.accept()
+
+        # Auth: first message must be {"type":"auth","token":"<access_token>"} within 5 s.
+        try:
+            _raw_auth = await asyncio.wait_for(ws.receive(), timeout=5.0)
+        except asyncio.TimeoutError:
+            await ws.close(code=1008)
+            return
+
+        _auth_text = _raw_auth.get("text", "")
+        if not _auth_text:
+            await ws.close(code=1008)
+            return
+
+        try:
+            _auth_msg = json.loads(_auth_text)
+        except json.JSONDecodeError:
+            await ws.close(code=1008)
+            return
+
+        if _auth_msg.get("type") != "auth" or not _auth_msg.get("token"):
+            await ws.close(code=1008)
+            return
+
+        try:
+            from app.auth.tokens import decode_access_token
+            from app.db import User as _User, async_session as _async_session
+            _payload = decode_access_token(_auth_msg["token"])
+            _user_id = int(_payload["sub"])
+            async with _async_session() as _session:
+                _user = await _session.get(_User, _user_id)
+                if _user is None or not _user.is_active:
+                    await ws.close(code=1008)
+                    return
+        except Exception:
+            await ws.close(code=1008)
+            return
+
+        ws.state.user_id = _user_id
+        logger.info("Voice WebSocket connected")
+
+        audio_buffer = bytearray()
+        session_history: list[dict] = []
+
         while True:
             raw = await ws.receive()
 
             # Binary frames = audio data
             if raw.get("type") == "websocket.receive" and "bytes" in raw and raw["bytes"]:
-                audio_buffer.extend(raw["bytes"])
-                if check_vad(audio_buffer):
+                incoming = raw["bytes"]
+                if len(audio_buffer) + len(incoming) > settings.ws_max_audio_bytes:
+                    await send_msg(ws, MessageType.ERROR, {
+                        "message": "Audio buffer limit exceeded (max 10 MB). Recording stopped."
+                    })
+                    await ws.close(code=1009)
+                    return
+                audio_buffer.extend(incoming)
+                if await asyncio.to_thread(check_vad, bytes(audio_buffer)):
                     data_copy = bytes(audio_buffer)
                     audio_buffer.clear()
                     current_task = asyncio.create_task(
@@ -430,6 +497,7 @@ async def voice_endpoint(ws: WebSocket):
                             ws,
                             session_history,
                             client_tool_futures,
+                            user_id=_user_id,
                         )
                     )
                 continue
@@ -437,6 +505,10 @@ async def voice_endpoint(ws: WebSocket):
             # Text frames = JSON control messages
             text = raw.get("text")
             if not text:
+                continue
+
+            if len(text.encode()) > _WS_MAX_TEXT_BYTES:
+                await send_msg(ws, MessageType.ERROR, {"message": "Text message too large"})
                 continue
 
             try:
@@ -467,6 +539,7 @@ async def voice_endpoint(ws: WebSocket):
                             ws,
                             session_history,
                             client_tool_futures,
+                            user_id=_user_id,
                         )
                     )
 
@@ -491,6 +564,11 @@ async def voice_endpoint(ws: WebSocket):
     except Exception:
         logger.exception("Voice WebSocket error")
     finally:
+        count = _ws_connections_per_ip.get(client_ip, 1)
+        if count <= 1:
+            _ws_connections_per_ip.pop(client_ip, None)
+        else:
+            _ws_connections_per_ip[client_ip] = count - 1
         if current_task and not current_task.done():
             current_task.cancel()
         for future in client_tool_futures.values():

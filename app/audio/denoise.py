@@ -15,7 +15,7 @@ try:
     RNNOISE_AVAILABLE = True
     logger.info("RNNoise loaded — audio denoising enabled")
 except ImportError:
-    logger.warning("rnnoise-python not available — audio denoising disabled (pass-through)")
+    logger.info("rnnoise-python not available — audio denoising disabled (pass-through)")
 
 
 RNNOISE_SAMPLE_RATE = 48000

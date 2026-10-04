@@ -5,26 +5,31 @@ import base64
 import json
 import logging
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
-from app.llm import build_system_prompt, chat_with_tools
-from app.llm_claude import get_claude_llm
-from app.memory.store import get_memory_store
-from app.skills.base import get_ollama_tools, get_skill
+from app.auth.dependencies import get_current_user
+from app.chat.pipeline import run_chat_turn
+from app.config import get_settings
+from app.db import User
+from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
-# ── Response models ────────────────────────────────────────
+# ── Response models ─────────────────────────────────────────────────────────
 
 
 class TextChatRequest(BaseModel):
     message: str
     history: list[dict] = []
     tts: bool = False
+    # Set to true when the calling client can execute client_executed tools
+    # (i.e. it will send TOOL_RESULT_CLIENT-equivalent responses).  Defaults
+    # to false so calendar/device tools are excluded from HTTP chat.
+    client_tools: bool = False
 
 
 class TextChatResponse(BaseModel):
@@ -44,82 +49,7 @@ class AudioChatResponse(BaseModel):
     error: str | None = None
 
 
-# ── Shared helpers ─────────────────────────────────────────
-
-
-async def _run_chat_pipeline(
-    user_text: str,
-    history: list[dict],
-) -> tuple[str, list[dict], list[dict], str | None]:
-    """Run the LLM + tool-dispatch pipeline. Returns (reply, tool_calls, tool_results, error)."""
-
-    memory_store = get_memory_store()
-    memory_context = None
-    if memory_store:
-        results = await memory_store.search(user_text, top_k=5)
-        if results:
-            memory_context = results
-
-    system_prompt = build_system_prompt(memory_context)
-
-    messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(history[-20:])
-    messages.append({"role": "user", "content": user_text})
-
-    tools = get_ollama_tools()
-
-    # Use Claude as primary, Ollama as fallback
-    claude = get_claude_llm()
-    response = await claude.chat(messages, tools if tools else None)
-
-    if "error" in response and response["error"]:
-        return response["message"]["content"], [], [], response["error"]
-
-    assistant_message = response.get("message", {})
-    all_tool_calls: list[dict] = []
-    all_tool_results: list[dict] = []
-
-    tool_calls = assistant_message.get("tool_calls")
-    if tool_calls:
-        for tc in tool_calls:
-            func = tc.get("function", {})
-            tool_name = func.get("name", "")
-            tool_args = func.get("arguments", {})
-            all_tool_calls.append({"tool": tool_name, "args": tool_args})
-
-            skill = get_skill(tool_name)
-            if skill is None:
-                result = {"error": f"Unknown skill: {tool_name}"}
-            elif skill.client_executed:
-                result = {"error": f"Skill '{tool_name}' must be executed on the client device"}
-            elif skill.handler:
-                try:
-                    handler_result = skill.handler(**tool_args)
-                    if asyncio.iscoroutine(handler_result):
-                        result = await asyncio.wait_for(handler_result, timeout=skill.timeout)
-                    else:
-                        result = handler_result
-                except asyncio.TimeoutError:
-                    result = {"error": f"Skill '{tool_name}' timed out"}
-                except Exception as e:
-                    logger.exception("Skill %s failed", tool_name)
-                    result = {"error": str(e)}
-            else:
-                result = {"error": f"Skill '{tool_name}' has no handler"}
-
-            all_tool_results.append({"tool": tool_name, "result": result})
-            messages.append({"role": "tool", "content": json.dumps(result)})
-
-        response = await claude.chat(messages, tools if tools else None)
-        assistant_message = response.get("message", {})
-
-    reply = assistant_message.get("content", "")
-
-    if memory_store:
-        await memory_store.add_memory(user_text, {"role": "user", "type": "chat"})
-        await memory_store.add_memory(reply, {"role": "assistant", "type": "chat"})
-
-    return reply, all_tool_calls, all_tool_results, None
+# ── Shared helpers ──────────────────────────────────────────────────────────
 
 
 async def _get_tts_audio(text: str) -> str | None:
@@ -136,46 +66,96 @@ async def _get_tts_audio(text: str) -> str | None:
         return None
 
     try:
-        raw_audio = await asyncio.to_thread(_synthesize_speech, text)
+        raw_audio = await asyncio.wait_for(
+            asyncio.to_thread(_synthesize_speech, text),
+            timeout=get_settings().tts_timeout,
+        )
         if not raw_audio:
             return None
         return base64.b64encode(raw_audio).decode("ascii")
+    except asyncio.TimeoutError:
+        logger.warning("TTS synthesis timed out after %ds", get_settings().tts_timeout)
+        return None
     except Exception:
         logger.exception("TTS synthesis failed")
         return None
 
 
-# ── Endpoints ──────────────────────────────────────────────
+# ── Endpoints ───────────────────────────────────────────────────────────────
 
 
 @router.post("/text", response_model=TextChatResponse)
-async def text_chat(body: TextChatRequest):
+@limiter.limit(get_settings().rate_limit_llm)
+async def text_chat(
+    request: Request,
+    body: TextChatRequest,
+    current_user: User = Depends(get_current_user),
+):
     """Text chat with Athena. Set tts=true to also get the reply as audio."""
+    if not get_settings().any_llm_configured:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "no_llm_available",
+                "message": (
+                    "No LLM provider is configured. "
+                    "Set at least one of: ANTHROPIC_API_KEY, GROQ_API_KEY, "
+                    "NVIDIA_API_KEY, or OLLAMA_BASE_URL."
+                ),
+            },
+        )
 
-    reply, tool_calls, tool_results, error = await _run_chat_pipeline(
-        body.message, body.history
+    result = await run_chat_turn(
+        body.message, body.history,
+        client_capabilities=body.client_tools,
+        user_id=current_user.id,
     )
 
+    if result.error == "llm_providers_failed":
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "llm_providers_failed",
+                "message": result.reply,
+            },
+        )
+
     audio_b64 = None
-    if body.tts and not error:
-        audio_b64 = await _get_tts_audio(reply)
+    if body.tts and not result.error:
+        audio_b64 = await _get_tts_audio(result.reply)
 
     return TextChatResponse(
-        reply=reply,
+        reply=result.reply,
         audio_base64=audio_b64,
-        tool_calls=tool_calls,
-        tool_results=tool_results,
-        error=error,
+        tool_calls=result.tool_calls,
+        tool_results=result.tool_results,
+        error=result.error,
     )
 
 
 @router.post("/audio", response_model=AudioChatResponse)
+@limiter.limit(get_settings().rate_limit_llm)
 async def audio_chat(
+    request: Request,
     audio: UploadFile = File(..., description="Audio file (WAV or raw PCM, 16kHz 16-bit mono)"),
     history: str = Form(default="[]", description="JSON array of past messages"),
     tts: bool = Form(default=True, description="Return reply as audio"),
+    client_tools: bool = Form(default=False, description="Include client-executed tools"),
+    current_user: User = Depends(get_current_user),
 ):
     """Send audio, get a transcription + LLM reply (optionally with TTS audio back)."""
+    if not get_settings().any_llm_configured:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "no_llm_available",
+                "message": (
+                    "No LLM provider is configured. "
+                    "Set at least one of: ANTHROPIC_API_KEY, GROQ_API_KEY, "
+                    "NVIDIA_API_KEY, or OLLAMA_BASE_URL."
+                ),
+            },
+        )
 
     try:
         from app.websocket.voice import WHISPER_AVAILABLE, transcribe_audio
@@ -201,7 +181,19 @@ async def audio_chat(
             error="Empty audio file",
         )
 
-    transcript = await asyncio.to_thread(transcribe_audio, audio_bytes)
+    try:
+        transcript = await asyncio.wait_for(
+            asyncio.to_thread(transcribe_audio, audio_bytes),
+            timeout=get_settings().stt_timeout,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("STT timed out after %ds", get_settings().stt_timeout)
+        return AudioChatResponse(
+            transcript="",
+            reply="",
+            error="Transcription timed out",
+        )
+
     if not transcript or transcript == "[STT unavailable]":
         return AudioChatResponse(
             transcript=transcript or "",
@@ -214,19 +206,30 @@ async def audio_chat(
     except json.JSONDecodeError:
         parsed_history = []
 
-    reply, tool_calls, tool_results, error = await _run_chat_pipeline(
-        transcript, parsed_history
+    result = await run_chat_turn(
+        transcript, parsed_history,
+        client_capabilities=client_tools,
+        user_id=current_user.id,
     )
 
+    if result.error == "llm_providers_failed":
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "llm_providers_failed",
+                "message": result.reply,
+            },
+        )
+
     audio_b64 = None
-    if tts and not error:
-        audio_b64 = await _get_tts_audio(reply)
+    if tts and not result.error:
+        audio_b64 = await _get_tts_audio(result.reply)
 
     return AudioChatResponse(
         transcript=transcript,
-        reply=reply,
+        reply=result.reply,
         audio_base64=audio_b64,
-        tool_calls=tool_calls,
-        tool_results=tool_results,
-        error=error,
+        tool_calls=result.tool_calls,
+        tool_results=result.tool_results,
+        error=result.error,
     )

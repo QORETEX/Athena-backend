@@ -8,11 +8,14 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db
+from app.auth.dependencies import get_current_user
+from app.config import get_settings
+from app.db import User, get_db
+from app.rate_limit import limiter
 from app.services.relationship_service import RelationshipService
 
 logger = logging.getLogger(__name__)
@@ -72,10 +75,12 @@ Tracks everyone important to you, remembers details about them, and suggests fol
 "Sir, you haven't contacted John in 45 days. Last discussed: His new startup idea."
 """)
 async def create_contact(
-    contact: ContactCreate, db: AsyncSession = Depends(get_db)
+    contact: ContactCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Create a new contact"""
-    service = RelationshipService(db)
+    service = RelationshipService(db, current_user.id)
 
     created = await service.create_contact(
         name=contact.name,
@@ -112,10 +117,12 @@ Get all contacts, optionally filtered by relationship type.
 **JARVIS use:** Displays relationship overview
 """)
 async def list_contacts(
-    relationship: Optional[str] = None, db: AsyncSession = Depends(get_db)
+    relationship: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """List all contacts"""
-    service = RelationshipService(db)
+    service = RelationshipService(db, current_user.id)
     contacts = await service.get_all_contacts(relationship_type=relationship)
 
     import json
@@ -150,9 +157,13 @@ Get detailed information about a specific contact.
 
 **JARVIS use:** Provides context before reaching out
 """)
-async def get_contact(contact_id: int, db: AsyncSession = Depends(get_db)):
+async def get_contact(
+    contact_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Get contact details"""
-    service = RelationshipService(db)
+    service = RelationshipService(db, current_user.id)
     contact = await service.get_contact(contact_id)
 
     if not contact:
@@ -194,10 +205,13 @@ Update contact information.
 **JARVIS use:** Keep contact information current
 """)
 async def update_contact(
-    contact_id: int, update: ContactUpdate, db: AsyncSession = Depends(get_db)
+    contact_id: int,
+    update: ContactUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Update contact"""
-    service = RelationshipService(db)
+    service = RelationshipService(db, current_user.id)
 
     updated = await service.update_contact(
         contact_id=contact_id,
@@ -224,9 +238,13 @@ async def update_contact(
 @router.delete("/contacts/{contact_id}", summary="Delete contact", description="""
 Delete a contact permanently.
 """)
-async def delete_contact(contact_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_contact(
+    contact_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Delete a contact"""
-    service = RelationshipService(db)
+    service = RelationshipService(db, current_user.id)
     success = await service.delete_contact(contact_id)
 
     if not success:
@@ -265,10 +283,13 @@ Record an interaction with a contact.
 - Regular contact maintains relationship
 """)
 async def record_interaction(
-    contact_id: int, interaction: InteractionCreate, db: AsyncSession = Depends(get_db)
+    contact_id: int,
+    interaction: InteractionCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Record an interaction with contact"""
-    service = RelationshipService(db)
+    service = RelationshipService(db, current_user.id)
 
     recorded = await service.record_interaction(
         contact_id=contact_id,
@@ -307,12 +328,15 @@ Get contacts that need follow-up.
 
 **Use case:** Maintain relationships automatically
 """)
+@limiter.limit(get_settings().rate_limit_llm)
 async def get_followups(
+    request: Request,
     days: int = Query(30, description="Days since last contact"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get contacts needing follow-up"""
-    service = RelationshipService(db)
+    service = RelationshipService(db, current_user.id)
     suggestions = await service.get_contacts_needing_followup(days_threshold=days)
 
     return {
@@ -341,9 +365,10 @@ Get upcoming birthdays, anniversaries, and other important dates.
 async def get_important_dates(
     days_ahead: int = Query(30, description="Days to look ahead"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get upcoming important dates"""
-    service = RelationshipService(db)
+    service = RelationshipService(db, current_user.id)
     upcoming = await service.get_upcoming_important_dates(days_ahead=days_ahead)
 
     return {"days_ahead": days_ahead, "upcoming_dates": upcoming}
@@ -355,10 +380,12 @@ Search contacts by name, email, or notes.
 **JARVIS use:** "Find contact named John" or "Who works at TechCorp?"
 """)
 async def search_contacts(
-    q: str = Query(..., description="Search query"), db: AsyncSession = Depends(get_db)
+    q: str = Query(..., description="Search query"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Search contacts"""
-    service = RelationshipService(db)
+    service = RelationshipService(db, current_user.id)
     results = await service.search_contacts(q)
 
     return {
@@ -393,9 +420,12 @@ Get overall relationship intelligence statistics.
  - 8 contacts need attention (haven't contacted in 60+ days)
  - Average relationship strength: 6.5/10"
 """)
-async def get_stats(db: AsyncSession = Depends(get_db)):
+async def get_stats(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Get relationship statistics"""
-    service = RelationshipService(db)
+    service = RelationshipService(db, current_user.id)
     stats = await service.get_relationship_stats()
 
     return stats

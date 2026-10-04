@@ -1,32 +1,73 @@
-"""
-Pytest configuration and fixtures for Athena backend tests
-"""
-import asyncio
+"""Pytest configuration and fixtures for Athena backend tests."""
 import os
-from typing import AsyncGenerator, Generator
+from typing import AsyncGenerator
+
+# Set test environment BEFORE any app imports so Settings() picks them up.
+# Hard-set (not setdefault) so no shell variable can override these.
+os.environ["ENVIRONMENT"] = "development"
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+os.environ["JWT_SECRET"] = "test-secret-key-for-testing-only-padded-abcdef"
+os.environ["PASSWORD_AUTH_ENABLED"] = "true"
+os.environ["RATE_LIMIT_AUTH"] = "10000/minute"
+os.environ["RATE_LIMIT_LLM"] = "10000/minute"
+os.environ["RATE_LIMIT_IMAGE"] = "10000/minute"
 
 import pytest
+import pytest_asyncio
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
+from app.config import Settings, get_settings
+
+# Clear any stale lru_cache entry from a prior import.
+get_settings.cache_clear()
+
+# Build test settings that never read .env — result is deterministic in any
+# shell environment, including `env -i PATH=... HOME=... pytest ...`.
+_test_settings = Settings(
+    _env_file=None,
+    environment="development",
+    database_url="sqlite+aiosqlite:///:memory:",
+    jwt_secret="test-secret-key-for-testing-only-padded-abcdef",
+    password_auth_enabled=True,
+    rate_limit_auth="10000/minute",
+    rate_limit_llm="10000/minute",
+    rate_limit_image="10000/minute",
+)
+
+# Replace the module-level get_settings so every app module imported after
+# this point gets our test settings when it does `from app.config import get_settings`.
+import app.config as _config
+_config.get_settings = lambda: _test_settings  # type: ignore[assignment]
+
 from app.db import Base, get_db
+from app.rate_limit import limiter
 from main import app
 
+# Disable SlowAPI rate limiting in tests.
+limiter._enabled = False
 
-# Test database URL
+# Register all skill modules once at collection time (the lifespan does not run
+# during tests, so skills would otherwise be absent from the registry).
+from app.skills.registry import register_all_skills as _register_all_skills
+_register_all_skills()
+
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 
-@pytest.fixture(scope="session")
-def event_loop() -> Generator:
-    """Create an instance of the default event loop for the test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
+@pytest.fixture(scope="session", autouse=True)
+def ensure_skills_registered():
+    """Guarantee skills are registered before any test runs.
+
+    The lifespan does not execute in test mode, so this fixture is the canonical
+    place that mirrors the startup call. The parity tests depend on this.
+    """
+    from app.skills.registry import register_all_skills
+    register_all_skills()
 
 
-@pytest.fixture(scope="function")
+@pytest_asyncio.fixture(scope="function")
 async def test_db() -> AsyncGenerator[AsyncSession, None]:
     """Create a fresh test database for each test."""
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)
@@ -65,10 +106,95 @@ def client(override_get_db) -> TestClient:
 
 
 @pytest.fixture
+def authenticated_client(override_get_db) -> TestClient:
+    """TestClient pre-authenticated with a test user via /api/auth/register."""
+    tc = TestClient(app)
+    resp = tc.post("/api/auth/register", json={
+        "email": "testuser@example.com",
+        "password": "testpassword123",
+        "name": "Test User",
+    })
+    assert resp.status_code == 200, f"Register failed: {resp.status_code} {resp.text}"
+    token = resp.json()["access_token"]
+    return TestClient(app, headers={"Authorization": f"Bearer {token}"})
+
+
+@pytest_asyncio.fixture
 async def async_client(override_get_db) -> AsyncGenerator[AsyncClient, None]:
     """Create an async test client."""
     async with AsyncClient(app=app, base_url="http://test") as ac:
         yield ac
+
+
+@pytest.fixture
+def user_a(override_get_db) -> dict:
+    """Register user A in the test DB; return {id, email, access_token}."""
+    tc = TestClient(app)
+    resp = tc.post("/api/auth/register", json={
+        "email": "user_a@isolation.test",
+        "password": "passwordA_123",
+        "name": "User A",
+    })
+    assert resp.status_code == 200, f"user_a register failed: {resp.text}"
+    data = resp.json()
+    return {
+        "id": data["user"]["id"],
+        "email": "user_a@isolation.test",
+        "access_token": data["access_token"],
+    }
+
+
+@pytest.fixture
+def user_b(override_get_db) -> dict:
+    """Register user B in the test DB; return {id, email, access_token}."""
+    tc = TestClient(app)
+    resp = tc.post("/api/auth/register", json={
+        "email": "user_b@isolation.test",
+        "password": "passwordB_456",
+        "name": "User B",
+    })
+    assert resp.status_code == 200, f"user_b register failed: {resp.text}"
+    data = resp.json()
+    return {
+        "id": data["user"]["id"],
+        "email": "user_b@isolation.test",
+        "access_token": data["access_token"],
+    }
+
+
+@pytest.fixture
+def client_a(user_a) -> TestClient:
+    """TestClient pre-authenticated as user A."""
+    return TestClient(app, headers={"Authorization": f"Bearer {user_a['access_token']}"})
+
+
+@pytest.fixture
+def client_b(user_b) -> TestClient:
+    """TestClient pre-authenticated as user B."""
+    return TestClient(app, headers={"Authorization": f"Bearer {user_b['access_token']}"})
+
+
+@pytest.fixture
+def skill_runner():
+    """Return an async callable that runs a skill handler coroutine as a given user.
+
+    Sets ``_current_user_id`` in the pipeline ContextVar for the duration of the
+    call so skills can reach ``current_user_id()`` without raising RuntimeError.
+
+    Usage inside an ``@pytest.mark.asyncio`` test::
+
+        result = await skill_runner(handle_set_reminder(text="...", time="..."), user_id=1)
+    """
+    from app.chat.pipeline import _current_user_id
+
+    async def _run(coro, *, user_id: int):
+        token = _current_user_id.set(user_id)
+        try:
+            return await coro
+        finally:
+            _current_user_id.reset(token)
+
+    return _run
 
 
 @pytest.fixture
@@ -97,10 +223,3 @@ def mock_jwt_token():
 def sample_audio_data():
     """Sample audio data for testing (base64 encoded WAV header)."""
     return "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="
-
-
-# Set test environment variables
-os.environ["TESTING"] = "true"
-os.environ["DATABASE_URL"] = TEST_DATABASE_URL
-os.environ["OLLAMA_BASE_URL"] = "http://localhost:11434"
-os.environ["JWT_SECRET"] = "test-secret-key-for-testing-only"

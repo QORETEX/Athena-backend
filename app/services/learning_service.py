@@ -18,8 +18,9 @@ logger = logging.getLogger(__name__)
 class LearningService:
     """Service for managing user knowledge and learning"""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, user_id: int):
         self.db = db
+        self.user_id = user_id
 
     async def teach(
         self,
@@ -53,6 +54,7 @@ class LearningService:
         else:
             # Create new knowledge
             knowledge = UserKnowledge(
+                user_id=self.user_id,
                 category=category,
                 key=key,
                 value=value,
@@ -74,7 +76,9 @@ class LearningService:
         """Get specific knowledge by category and key"""
         result = await self.db.execute(
             select(UserKnowledge).where(
-                UserKnowledge.category == category, UserKnowledge.key == key
+                UserKnowledge.user_id == self.user_id,
+                UserKnowledge.category == category,
+                UserKnowledge.key == key,
             )
         )
         knowledge = result.scalar_one_or_none()
@@ -90,7 +94,9 @@ class LearningService:
     async def get_by_id(self, knowledge_id: int) -> Optional[UserKnowledge]:
         """Get knowledge by ID"""
         result = await self.db.execute(
-            select(UserKnowledge).where(UserKnowledge.id == knowledge_id)
+            select(UserKnowledge).where(
+                UserKnowledge.id == knowledge_id, UserKnowledge.user_id == self.user_id
+            )
         )
         return result.scalar_one_or_none()
 
@@ -98,7 +104,9 @@ class LearningService:
         self, category: Optional[str] = None
     ) -> List[UserKnowledge]:
         """Get all knowledge, optionally filtered by category"""
-        query = select(UserKnowledge).order_by(UserKnowledge.category, UserKnowledge.key)
+        query = select(UserKnowledge).where(
+            UserKnowledge.user_id == self.user_id
+        ).order_by(UserKnowledge.category, UserKnowledge.key)
 
         if category:
             query = query.where(UserKnowledge.category == category)
@@ -110,11 +118,12 @@ class LearningService:
         """Search knowledge by key, value, or context"""
         result = await self.db.execute(
             select(UserKnowledge).where(
+                UserKnowledge.user_id == self.user_id,
                 or_(
                     UserKnowledge.key.ilike(f"%{query}%"),
                     UserKnowledge.value.ilike(f"%{query}%"),
                     UserKnowledge.context.ilike(f"%{query}%"),
-                )
+                ),
             )
         )
         return list(result.scalars().all())

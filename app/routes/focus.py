@@ -11,7 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db
+from app.auth.dependencies import get_current_user
+from app.db import User, get_db
 from app.services.focus_service import FocusService
 
 logger = logging.getLogger(__name__)
@@ -62,10 +63,12 @@ JARVIS: "Focus mode activated. Holding all non-urgent notifications. I'll alert 
 Deep work protection - no distractions for focused time.
 """)
 async def start_focus_session(
-    session: FocusSessionStart, db: AsyncSession = Depends(get_db)
+    session: FocusSessionStart,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Start a focus session"""
-    service = FocusService(db)
+    service = FocusService(db, current_user.id)
 
     started = await service.start_focus_session(
         focus_type=session.focus_type,
@@ -105,10 +108,13 @@ End an active focus session.
 **Use case:** Track productivity and deep work effectiveness
 """)
 async def end_focus_session(
-    session_id: int, end_data: FocusSessionEnd, db: AsyncSession = Depends(get_db)
+    session_id: int,
+    end_data: FocusSessionEnd,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """End a focus session"""
-    service = FocusService(db)
+    service = FocusService(db, current_user.id)
 
     ended = await service.end_focus_session(
         session_id=session_id,
@@ -139,9 +145,12 @@ Check if currently in focus mode.
 **JARVIS use:** Check before showing notifications
 "User is in deep work session, hold non-urgent notifications"
 """)
-async def get_current_session(db: AsyncSession = Depends(get_db)):
+async def get_current_session(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Get current active focus session"""
-    service = FocusService(db)
+    service = FocusService(db, current_user.id)
     current = await service.get_current_session()
 
     if not current:
@@ -182,9 +191,10 @@ async def get_sessions(
     days: int = Query(7, description="Days to look back"),
     limit: int = Query(20, description="Max results"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get recent focus sessions"""
-    service = FocusService(db)
+    service = FocusService(db, current_user.id)
     sessions = await service.get_recent_sessions(days=days, limit=limit)
 
     return {
@@ -236,9 +246,10 @@ Get focus session analytics.
 async def get_focus_stats(
     days: int = Query(7, description="Days to analyze"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get focus statistics"""
-    service = FocusService(db)
+    service = FocusService(db, current_user.id)
     stats = await service.get_focus_stats(days=days)
 
     return stats
@@ -265,9 +276,12 @@ Should I schedule your deep work during these times?"
 
 **Use case:** Optimize calendar for maximum productivity
 """)
-async def get_optimal_times(db: AsyncSession = Depends(get_db)):
+async def get_optimal_times(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Get optimal focus times based on history"""
-    service = FocusService(db)
+    service = FocusService(db, current_user.id)
     optimal_times = await service.get_optimal_focus_times()
 
     return {
@@ -312,9 +326,10 @@ Auto-detect if user is in focus mode based on context.
 async def detect_focus(
     context: Dict = Body(..., description="Current user context"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Auto-detect and start focus session"""
-    service = FocusService(db)
+    service = FocusService(db, current_user.id)
     session = await service.detect_focus_session(context)
 
     if session:
@@ -335,10 +350,12 @@ Increment count of notifications held during focus.
 **JARVIS use:** Internal tracking - called when notification is held during focus mode
 """)
 async def record_held_notification(
-    session_id: int, db: AsyncSession = Depends(get_db)
+    session_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Record that a notification was held during focus"""
-    service = FocusService(db)
+    service = FocusService(db, current_user.id)
     success = await service.increment_notifications_held(session_id)
 
     if not success:
@@ -352,9 +369,13 @@ Increment count of interruptions during focus.
 
 **JARVIS use:** Track when focus is broken (phone call, urgent alert, etc.)
 """)
-async def record_interruption(session_id: int, db: AsyncSession = Depends(get_db)):
+async def record_interruption(
+    session_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Record an interruption during focus"""
-    service = FocusService(db)
+    service = FocusService(db, current_user.id)
     success = await service.increment_interruptions(session_id)
 
     if not success:

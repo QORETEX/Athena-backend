@@ -13,7 +13,10 @@ logger = logging.getLogger(__name__)
 
 
 async def handle_save_note(content: str, tags: list[str] | None = None) -> dict:
+    from app.chat.pipeline import current_user_id
+    user_id = current_user_id()
     note = Note(
+        user_id=user_id,
         content=content,
         tags=json.dumps(tags or []),
     )
@@ -26,10 +29,12 @@ async def handle_save_note(content: str, tags: list[str] | None = None) -> dict:
 
 
 async def handle_search_notes(query: str) -> dict:
+    from app.chat.pipeline import current_user_id
+    user_id = current_user_id()
     async with async_session() as session:
         result = await session.execute(
             select(Note)
-            .where(Note.content.ilike(f"%{query}%"))
+            .where(Note.user_id == user_id, Note.content.ilike(f"%{query}%"))
             .order_by(Note.created_at.desc())
             .limit(10)
         )
@@ -49,8 +54,10 @@ async def handle_search_notes(query: str) -> dict:
 
 
 async def handle_delete_note(note_id: int) -> dict:
+    from app.chat.pipeline import current_user_id
+    user_id = current_user_id()
     async with async_session() as session:
-        result = await session.execute(select(Note).where(Note.id == note_id))
+        result = await session.execute(select(Note).where(Note.id == note_id, Note.user_id == user_id))
         note = result.scalar_one_or_none()
         if not note:
             return {"success": False, "error": f"Note {note_id} not found"}
@@ -63,6 +70,7 @@ async def handle_delete_note(note_id: int) -> dict:
 register_skill(
     Skill(
         name="save_note",
+        summary="Save a note",
         description="Save a note for the user. Use this when the user asks to remember something, take a note, or jot something down.",
         parameters={
             "type": "object",
@@ -86,6 +94,7 @@ register_skill(
 register_skill(
     Skill(
         name="search_notes",
+        summary="Search saved notes",
         description="Search the user's saved notes by keyword.",
         parameters={
             "type": "object",
@@ -104,6 +113,7 @@ register_skill(
 register_skill(
     Skill(
         name="delete_note",
+        summary="Delete a note",
         description="Delete a specific note by its ID.",
         parameters={
             "type": "object",

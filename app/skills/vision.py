@@ -181,6 +181,7 @@ async def handle_register_face(name: str, image_base64: str) -> dict:
 register_skill(
     Skill(
         name="vision",
+        summary="Analyze an image",
         description="Analyze an image: identify faces, detect objects, or read text (OCR). Send a base64-encoded image and specify the task.",
         parameters={
             "type": "object",
@@ -203,12 +204,15 @@ register_skill(
         },
         handler=handle_vision,
         timeout=60,
+        enabled_check=lambda: FACE_RECOGNITION_AVAILABLE or YOLO_AVAILABLE or TESSERACT_AVAILABLE,
+        unavailable_reason="face_recognition, ultralytics, pytesseract not installed",
     )
 )
 
 register_skill(
     Skill(
         name="register_face",
+        summary="Register a face",
         description="Register a new face so it can be identified later. Provide the person's name and a clear photo of their face.",
         parameters={
             "type": "object",
@@ -226,5 +230,7 @@ register_skill(
         },
         handler=handle_register_face,
         timeout=30,
+        enabled_check=lambda: FACE_RECOGNITION_AVAILABLE,
+        unavailable_reason="face_recognition not installed",
     )
 )

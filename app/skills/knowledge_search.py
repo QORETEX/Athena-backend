@@ -1,5 +1,6 @@
 import logging
 
+from app.knowledge.ingest import CHROMA_AVAILABLE
 from app.skills.base import Skill, register_skill
 
 logger = logging.getLogger(__name__)
@@ -9,8 +10,8 @@ async def handle_knowledge_search(query: str, top_k: int = 5) -> dict:
     try:
         from app.knowledge.ingest import search_knowledge
 
-        results = await search_knowledge(query, top_k=top_k)
-        return {"results": results, "query": query}
+        raw = await search_knowledge(query, top_k=top_k)
+        return {"results": raw, "query": query}
     except Exception as e:
         logger.warning("Knowledge search failed: %s", e)
         return {"error": str(e), "query": query}
@@ -19,6 +20,7 @@ async def handle_knowledge_search(query: str, top_k: int = 5) -> dict:
 register_skill(
     Skill(
         name="search_knowledge",
+        summary="Search personal documents",
         description="Search the user's offline knowledge base (ingested documents like PDFs, text files). Use this when the user asks about their own documents or stored information.",
         parameters={
             "type": "object",
@@ -35,5 +37,8 @@ register_skill(
             "required": ["query"],
         },
         handler=handle_knowledge_search,
+        returns_external_content=True,
+        enabled_check=lambda: CHROMA_AVAILABLE,
+        unavailable_reason="chromadb not installed",
     )
 )

@@ -17,10 +17,10 @@
 📋 YOUR .ENV FILE IS UPDATED:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-GROQ_API_KEY=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
+GROQ_API_KEY=<REDACTED — set in Render dashboard>
 GROQ_MODEL=openai/gpt-oss-20b  ← NEW MODEL
 
-DATABASE_URL=postgresql+asyncpg://neondb_owner:npg_QinvghC6l3mk@...
+DATABASE_URL=<REDACTED — set in Render dashboard>
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

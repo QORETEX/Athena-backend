@@ -157,32 +157,42 @@ export default apiClient;
 
 ## Authentication
 
-### Current Status
-⚠️ **Note:** Authentication is currently **optional**. All endpoints are accessible without authentication for development.
+Authentication is **required** for all endpoints except `/health`, `/api/auth/google`, `/api/auth/apple`, `/api/auth/refresh`, `/api/auth/register`, and `/api/auth/login`.
 
-### For Production
-When deploying, you'll want to implement authentication:
+Access tokens are short-lived JWTs (default 15 minutes). Use the refresh token to get a new pair before expiry.
 
 ```javascript
-// Login example (when auth is enabled)
 import apiClient from './client';
 
+// OAuth login (Google / Apple) — production
+async function loginWithGoogle(idToken, name) {
+  const { data } = await apiClient.post('/api/auth/google', { id_token: idToken, name });
+  localStorage.setItem('access_token', data.access_token);
+  localStorage.setItem('refresh_token', data.refresh_token);
+  return data.user;
+}
+
+// Password login — development / test only
 async function login(email, password) {
-  const response = await apiClient.post('/api/auth/login', {
-    email,
-    password,
-  });
-  
-  const { token, user } = response.data;
-  localStorage.setItem('auth_token', token);
-  localStorage.setItem('user', JSON.stringify(user));
-  
-  return user;
+  const { data } = await apiClient.post('/api/auth/login', { email, password });
+  localStorage.setItem('access_token', data.access_token);
+  localStorage.setItem('refresh_token', data.refresh_token);
+  return data.user;
+}
+
+async function refreshAccessToken() {
+  const refreshToken = localStorage.getItem('refresh_token');
+  const { data } = await apiClient.post('/api/auth/refresh', { refresh_token: refreshToken });
+  localStorage.setItem('access_token', data.access_token);
+  localStorage.setItem('refresh_token', data.refresh_token);
+  return data.access_token;
 }
 
 async function logout() {
-  localStorage.removeItem('auth_token');
-  localStorage.removeItem('user');
+  const refreshToken = localStorage.getItem('refresh_token');
+  await apiClient.post('/api/auth/logout', { refresh_token: refreshToken }).catch(() => {});
+  localStorage.removeItem('access_token');
+  localStorage.removeItem('refresh_token');
 }
 
 function getUser() {
@@ -793,12 +803,17 @@ GET /api/weather?lat={lat}&lon={lon}  - Get weather
 
 ### Voice Streaming
 
-**Connect to WebSocket:**
+**Connect to WebSocket (authentication required):**
+
+Both `/ws/voice` and `/ws/events` require authentication. After the connection is accepted, you must send an `auth` message within 5 seconds or the server will close the connection with code 1008 (Policy Violation).
+
 ```javascript
 const ws = new WebSocket('ws://localhost:8000/ws/voice');
 
 ws.onopen = () => {
-  console.log('Voice WebSocket connected');
+  // Send auth message immediately after connection
+  const accessToken = localStorage.getItem('access_token');
+  ws.send(JSON.stringify({ type: 'auth', token: accessToken }));
 };
 
 ws.onmessage = (event) => {
@@ -807,20 +822,22 @@ ws.onmessage = (event) => {
   if (data.type === 'transcription') {
     console.log('You said:', data.text);
   } else if (data.type === 'response') {
-    console.log('JARVIS:', data.text);
-    // Play audio response if included
+    console.log('Athena:', data.text);
     if (data.audio) {
       playAudio(data.audio);
     }
   }
 };
 
-// Send audio chunks
-function sendAudioChunk(audioData) {
-  ws.send(JSON.stringify({
-    type: 'audio',
-    data: audioData, // Base64 encoded audio
-  }));
+ws.onclose = (event) => {
+  if (event.code === 1008) {
+    console.error('WebSocket auth failed — check your access token');
+  }
+};
+
+// Send audio chunks (binary)
+function sendAudioChunk(pcm16Buffer) {
+  ws.send(pcm16Buffer);
 }
 
 // Signal end of speech
@@ -831,9 +848,14 @@ function endSpeech() {
 
 ### Event Stream
 
-**Connect for real-time events:**
+**Connect for real-time events (authentication required):**
 ```javascript
 const eventsWs = new WebSocket('ws://localhost:8000/ws/events');
+
+eventsWs.onopen = () => {
+  const accessToken = localStorage.getItem('access_token');
+  eventsWs.send(JSON.stringify({ type: 'auth', token: accessToken }));
+};
 
 eventsWs.onmessage = (event) => {
   const data = JSON.parse(event.data);

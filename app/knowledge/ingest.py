@@ -18,7 +18,7 @@ try:
 
     CHROMA_AVAILABLE = True
 except ImportError:
-    logger.warning("ChromaDB not available — knowledge ingestion disabled")
+    logger.info("ChromaDB not available — knowledge ingestion disabled")
 
 
 def _get_knowledge_collection():

@@ -4,7 +4,10 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, event
+from sqlalchemy import (
+    Boolean, DateTime, Float, ForeignKey, Index, Integer,
+    String, Text, UniqueConstraint, event, select,
+)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -15,7 +18,13 @@ class Base(DeclarativeBase):
     pass
 
 
-class Reminder(Base):
+class UserOwned:
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+
+class Reminder(UserOwned, Base):
     __tablename__ = "reminders"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -27,7 +36,7 @@ class Reminder(Base):
     )
 
 
-class Note(Base):
+class Note(UserOwned, Base):
     __tablename__ = "notes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -39,7 +48,7 @@ class Note(Base):
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class ConversationLog(Base):
+class ConversationLog(UserOwned, Base):
     __tablename__ = "conversation_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -51,7 +60,7 @@ class ConversationLog(Base):
     tool_calls: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
-class SmartHomeDevice(Base):
+class SmartHomeDevice(UserOwned, Base):
     __tablename__ = "smart_home_devices"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -68,13 +77,16 @@ class SmartHomeDevice(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (Index("ix_users_email", "email", unique=True),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    provider: Mapped[str] = mapped_column(String(20))
-    provider_id: Mapped[str] = mapped_column(String(255), unique=True)
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    preferred_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC", server_default="UTC")
     avatar_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    password_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -83,18 +95,54 @@ class User(Base):
     )
 
 
-class UserPreference(Base):
-    __tablename__ = "user_preferences"
+class UserIdentity(Base):
+    __tablename__ = "user_identities"
+    __table_args__ = (UniqueConstraint("provider", "subject", name="uq_user_identities_provider_subject"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(20), nullable=False)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    email_at_link: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    family_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    replaced_by_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("refresh_tokens.id"), nullable=True
+    )
+    user_agent: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+
+
+class UserPreference(UserOwned, Base):
+    __tablename__ = "user_preferences"
+
+    __table_args__ = (UniqueConstraint("user_id", "key", name="uq_user_preferences_user_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(100), nullable=False)
     value: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
 
-class Routine(Base):
+class Routine(UserOwned, Base):
     __tablename__ = "routines"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -110,7 +158,7 @@ class Routine(Base):
     )
 
 
-class BackgroundTask(Base):
+class BackgroundTask(UserOwned, Base):
     __tablename__ = "background_tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -125,7 +173,7 @@ class BackgroundTask(Base):
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class NotificationLog(Base):
+class NotificationLog(UserOwned, Base):
     __tablename__ = "notification_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -140,13 +188,13 @@ class NotificationLog(Base):
     )
 
 
-class PushToken(Base):
+class PushToken(UserOwned, Base):
     __tablename__ = "push_tokens"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     token: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     device_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    platform: Mapped[str] = mapped_column(String(20), nullable=False)  # "ios" or "android"
+    platform: Mapped[str] = mapped_column(String(20), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -156,8 +204,7 @@ class PushToken(Base):
     )
 
 
-class Email(Base):
-    """Email messages for email integration"""
+class Email(UserOwned, Base):
     __tablename__ = "emails"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -175,8 +222,7 @@ class Email(Base):
     )
 
 
-class Meeting(Base):
-    """Meetings with intelligence data"""
+class Meeting(UserOwned, Base):
     __tablename__ = "meetings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -184,19 +230,18 @@ class Meeting(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     location: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    attendees: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON array
+    attendees: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     prep_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    action_items: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
+    action_items: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
 
-class JournalEntry(Base):
-    """Voice journal entries"""
+class JournalEntry(UserOwned, Base):
     __tablename__ = "journal_entries"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -211,12 +256,11 @@ class JournalEntry(Base):
     )
 
 
-class Expense(Base):
-    """Expense tracking"""
+class Expense(UserOwned, Base):
     __tablename__ = "expenses"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    amount: Mapped[float] = mapped_column(nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="USD")
     category: Mapped[str] = mapped_column(String(50), nullable=False)
     merchant: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -228,8 +272,7 @@ class Expense(Base):
     )
 
 
-class Package(Base):
-    """Package tracking"""
+class Package(UserOwned, Base):
     __tablename__ = "packages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -239,21 +282,20 @@ class Package(Base):
     status: Mapped[str] = mapped_column(String(50), nullable=False)
     estimated_delivery: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     delivered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    tracking_updates: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
+    tracking_updates: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
 
-class UserPattern(Base):
-    """Learned user behavior patterns"""
+class UserPattern(UserOwned, Base):
     __tablename__ = "user_patterns"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     pattern_type: Mapped[str] = mapped_column(String(50), nullable=False)
     pattern_key: Mapped[str] = mapped_column(String(100), nullable=False)
     pattern_value: Mapped[str] = mapped_column(Text, nullable=False)
-    confidence: Mapped[float] = mapped_column(default=0.0)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
     occurrences: Mapped[int] = mapped_column(Integer, default=1)
     last_seen: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -263,16 +305,15 @@ class UserPattern(Base):
     )
 
 
-class LongTermMemory(Base):
-    """Long-term semantic memory storage"""
+class LongTermMemory(UserOwned, Base):
     __tablename__ = "long_term_memory"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    memory_type: Mapped[str] = mapped_column(String(50), nullable=False)  # conversation, fact, preference
+    memory_type: Mapped[str] = mapped_column(String(50), nullable=False)
     context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     embedding_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    importance: Mapped[float] = mapped_column(default=0.5)
+    importance: Mapped[float] = mapped_column(Float, default=0.5)
     access_count: Mapped[int] = mapped_column(Integer, default=0)
     last_accessed: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -280,15 +321,14 @@ class LongTermMemory(Base):
     )
 
 
-class AutomationRule(Base):
-    """Context-aware automation rules"""
+class AutomationRule(UserOwned, Base):
     __tablename__ = "automation_rules"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    trigger_conditions: Mapped[str] = mapped_column(Text, nullable=False)  # JSON: conditions to evaluate
-    actions: Mapped[str] = mapped_column(Text, nullable=False)  # JSON: actions to execute
+    trigger_conditions: Mapped[str] = mapped_column(Text, nullable=False)
+    actions: Mapped[str] = mapped_column(Text, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     priority: Mapped[int] = mapped_column(Integer, default=0)
     last_triggered: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -299,20 +339,19 @@ class AutomationRule(Base):
     )
 
 
-class Contact(Base):
-    """Relationship intelligence tracking"""
+class Contact(UserOwned, Base):
     __tablename__ = "contacts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    relationship: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # family, friend, colleague
-    relationship_strength: Mapped[float] = mapped_column(default=5.0)  # 0-10 scale
+    relationship: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    relationship_strength: Mapped[float] = mapped_column(Float, default=5.0)
     last_contact_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    contact_frequency_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Average days between contact
-    important_dates: Mapped[str] = mapped_column(Text, default="[]")  # JSON: birthdays, anniversaries
-    conversation_topics: Mapped[str] = mapped_column(Text, default="[]")  # JSON: recent topics discussed
+    contact_frequency_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    important_dates: Mapped[str] = mapped_column(Text, default="[]")
+    conversation_topics: Mapped[str] = mapped_column(Text, default="[]")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     suggested_followup: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -323,24 +362,22 @@ class Contact(Base):
     )
 
 
-class ContactInteraction(Base):
-    """Track interactions with contacts"""
+class ContactInteraction(UserOwned, Base):
     __tablename__ = "contact_interactions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     contact_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    interaction_type: Mapped[str] = mapped_column(String(50), nullable=False)  # call, email, meeting, message
+    interaction_type: Mapped[str] = mapped_column(String(50), nullable=False)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    topics: Mapped[str] = mapped_column(Text, default="[]")  # JSON array of topics
-    sentiment: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # positive, neutral, negative
+    topics: Mapped[str] = mapped_column(Text, default="[]")
+    sentiment: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     interaction_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
 
-class FocusSession(Base):
-    """Focus mode sessions"""
+class FocusSession(UserOwned, Base):
     __tablename__ = "focus_sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -348,11 +385,11 @@ class FocusSession(Base):
     end_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     planned_duration_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     actual_duration_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    focus_type: Mapped[str] = mapped_column(String(50), default="deep_work")  # deep_work, meeting, creative
+    focus_type: Mapped[str] = mapped_column(String(50), default="deep_work")
     activity: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     notifications_held: Mapped[int] = mapped_column(Integer, default=0)
     interruptions: Mapped[int] = mapped_column(Integer, default=0)
-    productivity_score: Mapped[Optional[float]] = mapped_column(nullable=True)  # 0-10
+    productivity_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     auto_detected: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -360,16 +397,17 @@ class FocusSession(Base):
     )
 
 
-class QuickAction(Base):
-    """Custom quick actions/shortcuts"""
+class QuickAction(UserOwned, Base):
     __tablename__ = "quick_actions"
 
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_quick_actions_user_name"),)
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
     trigger_phrase: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    actions: Mapped[str] = mapped_column(Text, nullable=False)  # JSON: list of actions to execute
-    category: Mapped[str] = mapped_column(String(50), default="custom")  # custom, preset, suggested
+    actions: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str] = mapped_column(String(50), default="custom")
     is_preset: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     execution_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -380,17 +418,19 @@ class QuickAction(Base):
 
 
 class UserKnowledge(Base):
-    """Learning system - facts and knowledge about user"""
     __tablename__ = "user_knowledge"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    category: Mapped[str] = mapped_column(String(50), nullable=False)  # preference, fact, skill, relationship
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    category: Mapped[str] = mapped_column(String(50), nullable=False)
     key: Mapped[str] = mapped_column(String(255), nullable=False)
     value: Mapped[str] = mapped_column(Text, nullable=False)
-    source: Mapped[str] = mapped_column(String(50), default="user")  # user, learned, inferred
-    confidence: Mapped[float] = mapped_column(default=1.0)  # 0-1 confidence score
+    source: Mapped[str] = mapped_column(String(50), default="user")
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
     context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    related_knowledge: Mapped[str] = mapped_column(Text, default="[]")  # JSON: IDs of related knowledge
+    related_knowledge: Mapped[str] = mapped_column(Text, default="[]")
     access_count: Mapped[int] = mapped_column(Integer, default=0)
     last_accessed: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     verified: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -402,49 +442,60 @@ class UserKnowledge(Base):
     )
 
 
-engine = None
-async_session: Optional[async_sessionmaker[AsyncSession]] = None
+def scoped(model, user_id: int):
+    return select(model).where(model.user_id == user_id)
+
+
+async def get_owned_or_none(session: AsyncSession, model, row_id: int, user_id: int):
+    result = await session.execute(
+        select(model).where(model.id == row_id, model.user_id == user_id)
+    )
+    return result.scalar_one_or_none()
 
 
 def _set_wal_mode(dbapi_conn, connection_record):
-    """Set WAL mode for SQLite databases only."""
     cursor = dbapi_conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.close()
 
 
-async def init_db(database_url: str):
-    global engine, async_session
-
-    # Detect database type
-    is_sqlite = "sqlite" in database_url.lower()
-    is_postgres = "postgresql" in database_url.lower()
-
-    # Create engine with appropriate settings
-    if is_postgres:
-        # PostgreSQL settings
-        engine = create_async_engine(
-            database_url,
-            echo=False,
-            pool_size=10,
-            max_overflow=20,
-            pool_pre_ping=True,  # Verify connections before using
+def _build_engine_and_session():
+    # Deferred import avoids a circular-import risk if app.config ever imports
+    # from app.db.  It also lets conftest.py replace get_settings before this
+    # module is first imported, so tests always get the in-memory test engine.
+    from app.config import get_settings
+    url = get_settings().database_url
+    if "postgresql" in url.lower():
+        _engine = create_async_engine(
+            url, echo=False, pool_size=10, max_overflow=20, pool_pre_ping=True
         )
         logger.info("Using PostgreSQL database")
     else:
-        # SQLite settings
-        engine = create_async_engine(database_url, echo=False)
-        event.listen(engine.sync_engine, "connect", _set_wal_mode)
+        _engine = create_async_engine(url, echo=False)
+        event.listen(_engine.sync_engine, "connect", _set_wal_mode)
         logger.info("Using SQLite database")
+    return _engine, async_sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
 
-    async_session = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+# Initialized at import time so every `from app.db import async_session` binding
+# captures a live factory, not None.  Previously init_db() used `global` to
+# reassign these after import, but that assignment was invisible to modules that
+# had already bound the name to None.
+engine, async_session = _build_engine_and_session()
 
-    logger.info("Database initialized")
+
+def get_async_session() -> async_sessionmaker[AsyncSession]:
+    """Return the module-level async session factory."""
+    return async_session
+
+
+async def init_db(database_url: str):
+    """No-op — engine and sessionmaker are initialized at module load from get_settings().
+
+    Kept for backward compatibility; main.py calls this during lifespan startup.
+    The database_url argument is accepted but ignored.
+    """
+    pass
 
 
 async def get_db():

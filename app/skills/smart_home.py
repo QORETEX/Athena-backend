@@ -2,6 +2,7 @@ import logging
 
 import httpx
 
+from app.availability import is_reachable, mark_unreachable
 from app.config import get_settings
 from app.skills.base import Skill, register_skill
 
@@ -10,8 +11,8 @@ logger = logging.getLogger(__name__)
 
 async def handle_smart_home(entity_id: str, action: str) -> dict:
     settings = get_settings()
-    if not settings.hass_token:
-        return {"success": False, "error": "Home Assistant not configured — set HASS_TOKEN in .env"}
+    if not settings.smart_home_enabled:
+        return {"success": False, "error": "Smart home is not configured — set HASS_URL and HASS_TOKEN in .env"}
 
     domain = entity_id.split(".")[0]
     url = f"{settings.hass_url}/api/services/{domain}/{action}"
@@ -31,6 +32,7 @@ async def handle_smart_home(entity_id: str, action: str) -> dict:
                 "error": f"Home Assistant returned {resp.status_code}: {resp.text[:200]}",
             }
     except httpx.ConnectError:
+        mark_unreachable("smart_home")
         return {"success": False, "error": f"Cannot connect to Home Assistant at {settings.hass_url}"}
     except httpx.TimeoutException:
         return {"success": False, "error": "Home Assistant request timed out"}
@@ -39,6 +41,7 @@ async def handle_smart_home(entity_id: str, action: str) -> dict:
 register_skill(
     Skill(
         name="control_smart_device",
+        summary="Control a smart home device",
         description="Control a smart home device via Home Assistant. Always confirm with the user before performing physical actions like turning lights on/off, locking doors, etc.",
         parameters={
             "type": "object",
@@ -57,5 +60,12 @@ register_skill(
         },
         handler=handle_smart_home,
         timeout=15,
+        # Offered only when HASS_URL + HASS_TOKEN are set AND Home Assistant is reachable.
+        enabled_check=lambda: get_settings().smart_home_enabled and is_reachable("smart_home"),
+        unavailable_reason=lambda: (
+            "HASS_URL and HASS_TOKEN not set"
+            if not get_settings().smart_home_enabled
+            else "Home Assistant not reachable (will retry in 5 min)"
+        ),
     )
 )

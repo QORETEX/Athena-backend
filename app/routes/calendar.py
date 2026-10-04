@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Query, Path
+from fastapi import APIRouter, HTTPException, Query, Path, Request
 
+from app.config import get_settings
+from app.rate_limit import limiter
 from app.services.calendar_service import get_calendar_service
 
 logger = logging.getLogger(__name__)
@@ -29,8 +31,10 @@ Fetch upcoming meetings from Google Calendar.
 
 **JARVIS use:** Automatic daily sync for briefings
 """)
+@limiter.limit(get_settings().rate_limit_llm)
 async def sync_calendar(
-    days_ahead: int = Query(7, description="Days to sync ahead", ge=1, le=30)
+    request: Request,
+    days_ahead: int = Query(7, description="Days to sync ahead", ge=1, le=30),
 ):
     """Sync upcoming meetings from Google Calendar"""
     calendar_service = get_calendar_service()
@@ -79,8 +83,10 @@ AI-generated meeting preparation brief using Claude.
 "Meeting with John Smith regarding Q4 targets. Last discussed: API integration concerns.
 Prepare: updated metrics dashboard, timeline adjustments. John prefers data-driven presentations."
 """)
+@limiter.limit(get_settings().rate_limit_llm)
 async def get_meeting_prep(
-    meeting_id: int = Path(..., description="Meeting ID from database")
+    request: Request,
+    meeting_id: int = Path(..., description="Meeting ID from database"),
 ):
     """Get AI-generated meeting preparation brief"""
     calendar_service = get_calendar_service()

@@ -5,17 +5,29 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.dependencies import get_current_user
 from app.config import get_settings
-from app.db import SmartHomeDevice, get_db
+from app.db import SmartHomeDevice, User, get_db, get_owned_or_none
 from app.skills.smart_home import handle_smart_home
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/smart-home", tags=["smart-home"])
+
+def _require_smart_home():
+    """Dependency: reject all smart-home requests when HASS_URL or HASS_TOKEN is unset."""
+    if not get_settings().smart_home_enabled:
+        raise HTTPException(status_code=503, detail="Smart home is not configured")
+
+
+router = APIRouter(
+    prefix="/api/smart-home",
+    tags=["smart-home"],
+    dependencies=[Depends(_require_smart_home)],
+)
 
 
 # ── Request / Response models ──────────────────────────────
@@ -43,6 +55,8 @@ class DeviceUpdate(BaseModel):
 
 
 class DeviceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     entity_id: str
     name: str
@@ -50,9 +64,6 @@ class DeviceResponse(BaseModel):
     room: Optional[str] = None
     icon: Optional[str] = None
     is_favorite: bool = False
-
-    class Config:
-        from_attributes = True
 
 
 # ── Control ────────────────────────────────────────────────
@@ -73,9 +84,12 @@ async def list_devices(
     device_type: Optional[str] = None,
     favorites_only: bool = False,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """List registered smart home devices."""
-    stmt = select(SmartHomeDevice).order_by(SmartHomeDevice.name)
+    stmt = select(SmartHomeDevice).where(
+        SmartHomeDevice.user_id == current_user.id
+    ).order_by(SmartHomeDevice.name)
     if room:
         stmt = stmt.where(SmartHomeDevice.room == room)
     if device_type:
@@ -88,15 +102,23 @@ async def list_devices(
 
 
 @router.post("/devices", response_model=DeviceResponse, status_code=201)
-async def add_device(body: DeviceCreate, db: AsyncSession = Depends(get_db)):
+async def add_device(
+    body: DeviceCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Register a smart home device."""
     existing = await db.execute(
-        select(SmartHomeDevice).where(SmartHomeDevice.entity_id == body.entity_id)
+        select(SmartHomeDevice).where(
+            SmartHomeDevice.user_id == current_user.id,
+            SmartHomeDevice.entity_id == body.entity_id,
+        )
     )
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail=f"Device {body.entity_id} already registered")
 
     device = SmartHomeDevice(
+        user_id=current_user.id,
         entity_id=body.entity_id,
         name=body.name,
         device_type=body.device_type,
@@ -115,9 +137,10 @@ async def update_device(
     device_id: int,
     body: DeviceUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Update a registered device's metadata."""
-    device = await db.get(SmartHomeDevice, device_id)
+    device = await get_owned_or_none(db, SmartHomeDevice, device_id, current_user.id)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
@@ -136,9 +159,13 @@ async def update_device(
 
 
 @router.delete("/devices/{device_id}", status_code=204)
-async def remove_device(device_id: int, db: AsyncSession = Depends(get_db)):
+async def remove_device(
+    device_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Remove a registered device."""
-    device = await db.get(SmartHomeDevice, device_id)
+    device = await get_owned_or_none(db, SmartHomeDevice, device_id, current_user.id)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     await db.delete(device)
@@ -149,10 +176,8 @@ async def remove_device(device_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.get("/discover")
 async def discover_devices():
-    """Query Home Assistant for all available entities. Requires HASS_TOKEN in .env."""
+    """Query Home Assistant for all available entities."""
     settings = get_settings()
-    if not settings.hass_token:
-        return {"error": "Home Assistant not configured — set HASS_URL and HASS_TOKEN in .env"}
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -184,11 +209,14 @@ async def discover_devices():
 
 
 @router.get("/rooms")
-async def list_rooms(db: AsyncSession = Depends(get_db)):
+async def list_rooms(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """List all rooms that have devices registered."""
     result = await db.execute(
         select(SmartHomeDevice.room)
-        .where(SmartHomeDevice.room.isnot(None))
+        .where(SmartHomeDevice.user_id == current_user.id, SmartHomeDevice.room.isnot(None))
         .distinct()
     )
     rooms = [r[0] for r in result.all() if r[0]]

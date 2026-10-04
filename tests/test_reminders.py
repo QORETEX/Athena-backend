@@ -6,7 +6,9 @@ from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import Reminder
+from app.db import Reminder, User
+
+BASE = "/api/reminders"
 
 
 @pytest.fixture
@@ -42,87 +44,80 @@ def multiple_reminders_data():
     ]
 
 
-def test_create_reminder(client: TestClient, sample_reminder_data):
+def test_create_reminder(authenticated_client: TestClient, sample_reminder_data):
     """Test creating a new reminder."""
-    response = client.post("/reminders", json=sample_reminder_data)
+    response = authenticated_client.post(f"{BASE}", json=sample_reminder_data)
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     data = response.json()
     assert data["text"] == sample_reminder_data["text"]
     assert "id" in data
     assert data["completed"] is False
 
 
-def test_create_reminder_past_time(client: TestClient):
+def test_create_reminder_past_time(authenticated_client: TestClient):
     """Test creating reminder with past timestamp."""
     past_reminder = {
         "text": "This is in the past",
         "remind_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
     }
 
-    response = client.post("/reminders", json=past_reminder)
-    # Should still create it (may want to change this behavior)
-    assert response.status_code == 200
+    response = authenticated_client.post(f"{BASE}", json=past_reminder)
+    assert response.status_code == 201
 
 
-def test_list_reminders(client: TestClient, multiple_reminders_data):
+def test_list_reminders(authenticated_client: TestClient, multiple_reminders_data):
     """Test listing all reminders."""
-    # Create multiple reminders
     for reminder_data in multiple_reminders_data:
-        client.post("/reminders", json=reminder_data)
+        authenticated_client.post(f"{BASE}", json=reminder_data)
 
-    response = client.get("/reminders")
+    response = authenticated_client.get(f"{BASE}")
     assert response.status_code == 200
     data = response.json()
 
     assert len(data) >= len(multiple_reminders_data)
 
 
-def test_get_reminder_by_id(client: TestClient, sample_reminder_data):
-    """Test getting a specific reminder by ID."""
-    create_response = client.post("/reminders", json=sample_reminder_data)
-    reminder_id = create_response.json()["id"]
+def test_create_and_find_reminder(authenticated_client: TestClient, sample_reminder_data):
+    """Test that a created reminder appears in the list."""
+    authenticated_client.post(f"{BASE}", json=sample_reminder_data)
 
-    response = client.get(f"/reminders/{reminder_id}")
+    response = authenticated_client.get(f"{BASE}")
     assert response.status_code == 200
     data = response.json()
-    assert data["id"] == reminder_id
-    assert data["text"] == sample_reminder_data["text"]
+    texts = [r["text"] for r in data]
+    assert sample_reminder_data["text"] in texts
 
 
-def test_get_nonexistent_reminder(client: TestClient):
-    """Test getting a reminder that doesn't exist."""
-    response = client.get("/reminders/999999")
+def test_patch_nonexistent_reminder(authenticated_client: TestClient):
+    """Test patching a reminder that doesn't exist returns 404."""
+    response = authenticated_client.patch(f"{BASE}/999999", json={"completed": True})
     assert response.status_code == 404
 
 
-def test_complete_reminder(client: TestClient, sample_reminder_data):
-    """Test marking a reminder as completed."""
-    create_response = client.post("/reminders", json=sample_reminder_data)
+def test_complete_reminder(authenticated_client: TestClient, sample_reminder_data):
+    """Test marking a reminder as completed via PATCH."""
+    create_response = authenticated_client.post(f"{BASE}", json=sample_reminder_data)
     reminder_id = create_response.json()["id"]
 
-    response = client.patch(f"/reminders/{reminder_id}/complete")
+    response = authenticated_client.patch(f"{BASE}/{reminder_id}", json={"completed": True})
     assert response.status_code == 200
     data = response.json()
     assert data["completed"] is True
 
 
-def test_delete_reminder(client: TestClient, sample_reminder_data):
+def test_delete_reminder(authenticated_client: TestClient, sample_reminder_data):
     """Test deleting a reminder."""
-    create_response = client.post("/reminders", json=sample_reminder_data)
+    create_response = authenticated_client.post(f"{BASE}", json=sample_reminder_data)
     reminder_id = create_response.json()["id"]
 
-    delete_response = client.delete(f"/reminders/{reminder_id}")
-    assert delete_response.status_code == 200
-
-    # Verify it's gone
-    get_response = client.get(f"/reminders/{reminder_id}")
-    assert get_response.status_code == 404
+    delete_response = authenticated_client.delete(f"{BASE}/{reminder_id}")
+    assert delete_response.status_code == 204
 
 
-def test_update_reminder(client: TestClient, sample_reminder_data):
-    """Test updating a reminder's text and time."""
-    create_response = client.post("/reminders", json=sample_reminder_data)
+def test_update_reminder(authenticated_client: TestClient, sample_reminder_data):
+    """Test updating a reminder's text and time via PATCH."""
+    create_response = authenticated_client.post(f"{BASE}", json=sample_reminder_data)
     reminder_id = create_response.json()["id"]
 
     update_data = {
@@ -130,7 +125,7 @@ def test_update_reminder(client: TestClient, sample_reminder_data):
         "remind_at": (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
     }
 
-    response = client.put(f"/reminders/{reminder_id}", json=update_data)
+    response = authenticated_client.patch(f"{BASE}/{reminder_id}", json=update_data)
     assert response.status_code == 200
     data = response.json()
     assert data["text"] == update_data["text"]
@@ -141,16 +136,19 @@ async def test_reminder_database_persistence(test_db: AsyncSession, sample_remin
     """Test that reminders are properly persisted to database."""
     from sqlalchemy import select
 
-    # Create reminder directly in DB
+    user = User(email="persist_reminder@test.com", name="Persist User")
+    test_db.add(user)
+    await test_db.flush()
+
     reminder = Reminder(
+        user_id=user.id,
         text=sample_reminder_data["text"],
-        remind_at=datetime.fromisoformat(sample_reminder_data["remind_at"])
+        remind_at=datetime.fromisoformat(sample_reminder_data["remind_at"]),
     )
     test_db.add(reminder)
     await test_db.commit()
     await test_db.refresh(reminder)
 
-    # Query it back
     result = await test_db.execute(select(Reminder).where(Reminder.id == reminder.id))
     fetched_reminder = result.scalar_one()
 

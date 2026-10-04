@@ -5,7 +5,7 @@ This file must be kept in sync between backend and mobile app
 
 from enum import Enum
 from typing import Optional, Any, Dict, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
 
 
@@ -123,36 +123,33 @@ class HealthResponse(BaseModel):
 
 # Database models (for API responses)
 class ReminderResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     text: str
     remind_at: datetime
     completed: bool = False
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 class NoteResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     content: str
     created_at: datetime
     updated_at: Optional[datetime] = None
     tags: List[str] = []
 
-    class Config:
-        from_attributes = True
-
 
 class ConversationLogResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     timestamp: datetime
     role: str
     content: str
     tool_calls: Optional[str] = None
-
-    class Config:
-        from_attributes = True
 
 
 # Skill-related models

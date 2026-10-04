@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
+from app.config import get_settings
+from app.rate_limit import limiter
 from app.services.briefing import get_briefing_service
 
 logger = logging.getLogger(__name__)
@@ -15,7 +17,8 @@ router = APIRouter(prefix="/api/briefing", tags=["briefing"])
 
 
 @router.get("/morning")
-async def get_morning_briefing():
+@limiter.limit(get_settings().rate_limit_llm)
+async def get_morning_briefing(request: Request):
     """
     Generate comprehensive morning briefing
 
@@ -31,7 +34,8 @@ async def get_morning_briefing():
 
 
 @router.get("/evening")
-async def get_evening_briefing():
+@limiter.limit(get_settings().rate_limit_llm)
+async def get_evening_briefing(request: Request):
     """
     Generate evening briefing
 

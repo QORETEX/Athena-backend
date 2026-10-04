@@ -9,6 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import Note, get_db
+from app.db import User, get_owned_or_none
+from app.auth.dependencies import get_current_user
 from app.schemas import NoteResponse
 
 router = APIRouter(prefix="/api/notes", tags=["notes"])
@@ -38,21 +40,22 @@ def _to_response(note: Note) -> NoteResponse:
     )
 
 
-@router.get("/", response_model=list[NoteResponse])
+@router.get("", response_model=list[NoteResponse])
 async def list_notes(
     search: str | None = None,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    stmt = select(Note).order_by(Note.created_at.desc())
+    stmt = select(Note).where(Note.user_id == current_user.id).order_by(Note.created_at.desc())
     if search:
         stmt = stmt.where(Note.content.ilike(f"%{search}%"))
     result = await db.execute(stmt)
     return [_to_response(n) for n in result.scalars().all()]
 
 
-@router.post("/", response_model=NoteResponse, status_code=201)
-async def create_note(body: NoteCreate, db: AsyncSession = Depends(get_db)):
-    note = Note(content=body.content, tags=json.dumps(body.tags))
+@router.post("", response_model=NoteResponse, status_code=201)
+async def create_note(body: NoteCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    note = Note(user_id=current_user.id, content=body.content, tags=json.dumps(body.tags))
     db.add(note)
     await db.flush()
     await db.refresh(note)
@@ -64,8 +67,9 @@ async def update_note(
     note_id: int,
     body: NoteUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    note = await db.get(Note, note_id)
+    note = await get_owned_or_none(db, Note, note_id, current_user.id)
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
 
@@ -81,8 +85,8 @@ async def update_note(
 
 
 @router.delete("/{note_id}", status_code=204)
-async def delete_note(note_id: int, db: AsyncSession = Depends(get_db)):
-    note = await db.get(Note, note_id)
+async def delete_note(note_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    note = await get_owned_or_none(db, Note, note_id, current_user.id)
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
     await db.delete(note)

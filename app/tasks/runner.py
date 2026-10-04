@@ -33,11 +33,12 @@ async def stop_task_worker():
     logger.info("Background task worker stopped")
 
 
-async def submit_task(task_type: str, prompt: str) -> int:
+async def submit_task(task_type: str, prompt: str, user_id: int) -> int:
     from app.db import BackgroundTask, async_session
 
     async with async_session() as session:
         task = BackgroundTask(
+            user_id=user_id,
             task_type=task_type,
             prompt=prompt,
             status="pending",

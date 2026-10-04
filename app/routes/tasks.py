@@ -10,7 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends
 
-from app.db import BackgroundTask, get_db
+from app.auth.dependencies import get_current_user
+from app.db import BackgroundTask, User, get_db, get_owned_or_none
 from app.tasks.runner import submit_task
 
 logger = logging.getLogger(__name__)
@@ -63,14 +64,17 @@ def _task_to_response(task: BackgroundTask) -> TaskDetailResponse:
 
 
 @router.post("/", response_model=TaskSubmitResponse, status_code=201)
-async def create_task(body: TaskSubmitRequest):
+async def create_task(
+    body: TaskSubmitRequest,
+    current_user: User = Depends(get_current_user),
+):
     if body.task_type not in ("research", "analysis", "summary"):
         raise HTTPException(
             status_code=400,
             detail=f"Invalid task_type '{body.task_type}'. Must be: research, analysis, summary",
         )
 
-    task_id = await submit_task(body.task_type, body.prompt)
+    task_id = await submit_task(body.task_type, body.prompt, user_id=current_user.id)
 
     return TaskSubmitResponse(
         task_id=task_id,
@@ -83,8 +87,11 @@ async def create_task(body: TaskSubmitRequest):
 async def list_tasks(
     status: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    stmt = select(BackgroundTask).order_by(BackgroundTask.created_at.desc())
+    stmt = select(BackgroundTask).where(
+        BackgroundTask.user_id == current_user.id
+    ).order_by(BackgroundTask.created_at.desc())
     if status:
         stmt = stmt.where(BackgroundTask.status == status)
 
@@ -94,16 +101,24 @@ async def list_tasks(
 
 
 @router.get("/{task_id}", response_model=TaskDetailResponse)
-async def get_task(task_id: int, db: AsyncSession = Depends(get_db)):
-    task = await db.get(BackgroundTask, task_id)
+async def get_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task = await get_owned_or_none(db, BackgroundTask, task_id, current_user.id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return _task_to_response(task)
 
 
 @router.delete("/{task_id}", status_code=204)
-async def delete_task(task_id: int, db: AsyncSession = Depends(get_db)):
-    task = await db.get(BackgroundTask, task_id)
+async def delete_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task = await get_owned_or_none(db, BackgroundTask, task_id, current_user.id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.status == "running":

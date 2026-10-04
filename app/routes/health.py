@@ -1,21 +1,20 @@
 from fastapi import APIRouter
 
+from app.audio.denoise import RNNOISE_AVAILABLE
+from app.memory.store import CHROMA_AVAILABLE
 from app.schemas import HealthResponse
+from app.skills.vision import (
+    FACE_RECOGNITION_AVAILABLE,
+    TESSERACT_AVAILABLE,
+    YOLO_AVAILABLE,
+)
+from app.websocket.voice import PIPER_AVAILABLE, VAD_AVAILABLE, WHISPER_AVAILABLE
 
 router = APIRouter(tags=["health"])
 
 
 @router.get("/health", response_model=HealthResponse)
 async def health_check():
-    from app.audio.denoise import RNNOISE_AVAILABLE
-    from app.memory.store import CHROMA_AVAILABLE
-    from app.skills.vision import (
-        FACE_RECOGNITION_AVAILABLE,
-        TESSERACT_AVAILABLE,
-        YOLO_AVAILABLE,
-    )
-    from app.websocket.voice import PIPER_AVAILABLE, VAD_AVAILABLE, WHISPER_AVAILABLE
-
     return HealthResponse(
         status="ok",
         version="2.0.0",

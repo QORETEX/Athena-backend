@@ -4,7 +4,7 @@ import httpx
 import json
 
 async def test_groq_detailed():
-    api_key = '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'
+    api_key = '<REDACTED — set GROQ_API_KEY in env>'
     model = 'openai/gpt-oss-120b'
     
     print("Testing Groq API...")

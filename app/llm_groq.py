@@ -1,20 +1,50 @@
-"""
-Groq AI integration - Fast and Free LLM
-"""
+"""Groq AI integration - Fast and free LLM fallback."""
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Optional
+
 import httpx
 
 from app.config import get_settings
+from app.llm import inject_security_instruction
 
 logger = logging.getLogger(__name__)
 
 
+class GroqAPIError(Exception):
+    """Parsed Groq 4xx error — carries error.type/code/message, never keys or request body."""
+
+    def __init__(
+        self,
+        http_status: int,
+        error_type: str,
+        error_code: str,
+        error_message: str,
+        retried: bool = False,
+    ):
+        self.http_status = http_status
+        self.error_type = error_type
+        self.error_code = error_code
+        self.error_message = error_message
+        self.retried = retried
+        super().__init__(f"Groq {http_status}: {error_code or error_type or 'unknown'}")
+
+
+def _parse_groq_error(response: httpx.Response) -> tuple[str, str, str]:
+    """Extract (error_type, error_code, error_message) from a Groq error response."""
+    try:
+        body = response.json()
+        err = body.get("error", {})
+        return (err.get("type", ""), err.get("code", ""), err.get("message", ""))
+    except Exception:
+        return ("", "", "")
+
+
 class GroqLLM:
-    """Groq AI client - Very fast and free"""
+    """Groq AI client."""
 
     def __init__(self):
         self.settings = get_settings()
@@ -23,93 +53,138 @@ class GroqLLM:
         self.available = bool(self.api_key)
 
         if self.available:
-            logger.info(f"✅ Groq AI enabled (model: {self.model})")
+            logger.info("Groq AI enabled (model: %s)", self.model)
         else:
-            logger.warning("⚠️  No Groq API key")
+            logger.warning("No Groq API key")
 
     async def chat(
         self,
         messages: list[dict],
+        tools: list[dict] | None = None,
         max_tokens: int = 2000,
         temperature: float = 0.7,
+        read_timeout: float | None = None,
     ) -> dict:
-        """
-        Chat with Groq API with retry logic
+        """Chat with Groq API.
 
-        Returns format compatible with Claude/Ollama:
-        {
-            "message": {
-                "role": "assistant",
-                "content": "response text"
-            }
-        }
+        Raises GroqAPIError for 4xx responses, httpx.TimeoutException / httpx.ConnectError
+        on network failures, so the caller can classify the error without coupling here.
         """
         if not self.available:
-            raise Exception("Groq API key not configured")
+            raise RuntimeError("Groq API key not configured")
 
-        max_retries = 2
-        retry_delay = 1.0  # seconds
+        settings = get_settings()
+        connect_to = float(settings.llm_connect_timeout)
+        read_to = read_timeout if read_timeout is not None else float(settings.llm_read_timeout)
+        timeout = httpx.Timeout(connect=connect_to, read=read_to, write=10.0, pool=5.0)
 
-        for attempt in range(max_retries + 1):
+        # Cap token generation at the provider's configured ceiling.
+        effective_max = min(max_tokens, settings.groq_max_tokens)
+
+        messages = inject_security_instruction(messages)
+
+        _tool_use_retried = False
+
+        # At most one retry: connection errors or 429/5xx or tool_use_failed.
+        # Read timeouts are never retried — the server is busy, a second request makes it worse.
+        for attempt in range(2):
             try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
+                json_body: dict = {
+                    "model": self.model,
+                    "messages": messages,
+                    "max_tokens": effective_max,
+                    "temperature": temperature,
+                }
+                if tools:
+                    json_body["tools"] = tools
+
+                async with httpx.AsyncClient(timeout=timeout) as client:
                     response = await client.post(
                         "https://api.groq.com/openai/v1/chat/completions",
                         headers={
                             "Authorization": f"Bearer {self.api_key}",
                             "Content-Type": "application/json",
                         },
-                        json={
-                            "model": self.model,
-                            "messages": messages,
-                            "max_tokens": max_tokens,
-                            "temperature": temperature,
-                        },
+                        json=json_body,
                     )
 
-                    response.raise_for_status()
-                    data = response.json()
+                response.raise_for_status()
+                data = response.json()
 
-                    # Get content from either content or reasoning field
-                    # (reasoning models put response in 'reasoning' field)
-                    message = data["choices"][0]["message"]
-                    content = message.get("content") or message.get("reasoning", "")
+                message = data["choices"][0]["message"]
+                # reasoning / reasoning_content are internal chain-of-thought fields —
+                # they must never be returned to the client or stored in history.
+                content = message.get("content") or ""
+                raw_tcs = message.get("tool_calls") or []
 
-                    # If still empty, log the full response for debugging
-                    if not content:
-                        logger.warning(f"Groq returned empty response: {data}")
-                        content = "I apologize, but I couldn't generate a response. Please try again."
+                if not content and not raw_tcs:
+                    logger.debug("Groq returned empty response: %s", data)
+                    content = "I apologize, but I couldn't generate a response. Please try again."
 
-                    # Convert to our standard format
-                    return {
-                        "message": {
-                            "role": "assistant",
-                            "content": content,
-                        }
-                    }
+                result: dict = {"message": {"role": "assistant", "content": content}}
+                if raw_tcs:
+                    parsed = []
+                    for tc in raw_tcs:
+                        func = tc.get("function", {})
+                        args = func.get("arguments", {})
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except (json.JSONDecodeError, ValueError):
+                                args = {}
+                        entry: dict = {"function": {"name": func.get("name", ""), "arguments": args}}
+                        if tc.get("id"):
+                            entry["id"] = tc["id"]
+                        parsed.append(entry)
+                    result["message"]["tool_calls"] = parsed
+
+                return result
+
+            except httpx.ReadTimeout:
+                raise
 
             except httpx.HTTPStatusError as e:
-                # Retry on 400/500 errors (common on first request after startup)
-                if attempt < max_retries and e.response.status_code in [400, 500, 502, 503]:
-                    logger.warning(f"Groq API error {e.response.status_code}, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})")
-                    await asyncio.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
+                status = e.response.status_code
+
+                if 400 <= status < 500:
+                    err_type, err_code, err_msg = _parse_groq_error(e.response)
+                    logger.warning(
+                        "Groq %d: type=%s code=%s message=%.200s",
+                        status,
+                        err_type or "-",
+                        err_code or "-",
+                        err_msg or "-",
+                    )
+                    # tool_use_failed: model produced a malformed tool call; retry once immediately.
+                    # Exception: "Tool choice is none, but model called a tool" means we sent
+                    # no tools but the model still tried to call one — retrying the identical
+                    # request won't help, so raise immediately.
+                    if status == 400 and err_code == "tool_use_failed" and attempt == 0:
+                        if "tool choice is none" in err_msg.lower():
+                            raise GroqAPIError(status, err_type, err_code, err_msg) from e
+                        logger.info("Groq: model produced invalid tool call — retrying once")
+                        _tool_use_retried = True
+                        continue
+                    retried = _tool_use_retried and err_code == "tool_use_failed"
+                    raise GroqAPIError(status, err_type, err_code, err_msg, retried=retried) from e
+
+                if attempt == 0 and status in (429, 500, 502, 503):
+                    logger.debug("Groq HTTP %d, retrying (attempt 1/1)", status)
+                    await asyncio.sleep(1.0)
                     continue
-                else:
-                    logger.error(f"Groq API error: {e}")
-                    raise
-            except Exception as e:
-                logger.error(f"Groq API error: {e}")
+                raise
+
+            except (httpx.ConnectTimeout, httpx.ConnectError):
+                if attempt == 0:
+                    logger.debug("Groq connection error, retrying (attempt 1/1)")
+                    await asyncio.sleep(1.0)
+                    continue
                 raise
 
 
-# Global instance
-_groq_llm: Optional[GroqLLM] = None
+# Initialized at module import so startup logs fire once during app startup.
+_groq_llm = GroqLLM()
 
 
 def get_groq_llm() -> GroqLLM:
-    """Get or create Groq LLM instance"""
-    global _groq_llm
-    if _groq_llm is None:
-        _groq_llm = GroqLLM()
     return _groq_llm

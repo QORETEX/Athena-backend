@@ -3,7 +3,7 @@ import asyncio
 import httpx
 
 async def test_model(model):
-    api_key = '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'
+    api_key = '<REDACTED — set GROQ_API_KEY in env>'
     
     print(f"\nTesting: {model}")
     print("-" * 60)

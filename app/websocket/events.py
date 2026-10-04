@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Optional
@@ -13,24 +14,68 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _event_clients: set[WebSocket] = set()
+_WS_MAX_TEXT_BYTES = 64 * 1024
 
 
-# ── WebSocket endpoint ────────────────────────────────────
+async def _authenticate(ws: WebSocket) -> bool:
+    """Expect {"type":"auth","token":"<access_token>"} within 5 s. Return True on success."""
+    try:
+        raw = await asyncio.wait_for(ws.receive(), timeout=5.0)
+    except asyncio.TimeoutError:
+        await ws.close(code=1008)
+        return False
+
+    text = raw.get("text", "")
+    if not text:
+        await ws.close(code=1008)
+        return False
+
+    try:
+        msg = json.loads(text)
+    except json.JSONDecodeError:
+        await ws.close(code=1008)
+        return False
+
+    if msg.get("type") != "auth" or not msg.get("token"):
+        await ws.close(code=1008)
+        return False
+
+    try:
+        from app.auth.tokens import decode_access_token
+        from app.db import User, async_session
+        payload = decode_access_token(msg["token"])
+        user_id = int(payload["sub"])
+        async with async_session() as session:
+            user = await session.get(User, user_id)
+            if user is None or not user.is_active:
+                await ws.close(code=1008)
+                return False
+    except Exception:
+        await ws.close(code=1008)
+        return False
+
+    ws.state.user_id = user_id
+    return True
 
 
 @router.websocket("/ws/events")
 async def events_endpoint(ws: WebSocket):
     await ws.accept()
+
+    if not await _authenticate(ws):
+        return
+
     _event_clients.add(ws)
     logger.info("Events WebSocket connected (total: %d)", len(_event_clients))
 
     try:
         while True:
             text = await ws.receive_text()
+            if len(text.encode()) > _WS_MAX_TEXT_BYTES:
+                await ws.send_json({"type": "error", "payload": {"message": "Message too large"}})
+                continue
             if text == "ping":
-                await ws.send_json(
-                    {"type": MessageType.PONG.value, "payload": {}}
-                )
+                await ws.send_json({"type": MessageType.PONG.value, "payload": {}})
     except WebSocketDisconnect:
         pass
     except Exception:
@@ -43,39 +88,31 @@ async def events_endpoint(ws: WebSocket):
 # ── Broadcast helpers ─────────────────────────────────────
 
 
-async def broadcast_event(msg_type: MessageType, payload: dict):
-    """Broadcast a typed event to all connected WebSocket clients."""
+async def broadcast_event(msg_type: MessageType, payload: dict, user_id: int | None = None):
     if not _event_clients:
         return
-
     dead: set[WebSocket] = set()
     message = {"type": msg_type.value, "payload": payload}
-
     for ws in _event_clients:
+        if user_id is not None and getattr(ws.state, "user_id", None) != user_id:
+            continue
         try:
             await ws.send_json(message)
         except Exception:
             dead.add(ws)
-
     _event_clients.difference_update(dead)
 
 
 async def _broadcast_raw(message: dict):
-    """Broadcast a raw dict message to all connected clients."""
     if not _event_clients:
         return
-
     dead: set[WebSocket] = set()
     for ws in _event_clients:
         try:
             await ws.send_json(message)
         except Exception:
             dead.add(ws)
-
     _event_clients.difference_update(dead)
-
-
-# ── Push notification (persisted + broadcast) ─────────────
 
 
 async def push_notification(
@@ -84,13 +121,9 @@ async def push_notification(
     title: str,
     body: str = "",
     data: Optional[dict] = None,
+    user_id: int | None = None,
 ) -> int:
-    """
-    Store a notification in the database and broadcast it to all connected
-    WebSocket clients. Returns the notification ID.
-
-    Can be called from anywhere (non-route code, background tasks, etc.)
-    """
+    """Store a notification in the database and broadcast it to connected clients."""
     from app.db import NotificationLog, async_session
 
     notif_id = 0
@@ -98,6 +131,7 @@ async def push_notification(
     if async_session is not None:
         async with async_session() as session:
             notif = NotificationLog(
+                user_id=user_id,
                 event_type=event_type,
                 priority=priority,
                 title=title,
@@ -125,10 +159,7 @@ async def push_notification(
 
     logger.info(
         "Notification pushed: [%s] %s — %s (id=%d)",
-        priority,
-        event_type,
-        title,
-        notif_id,
+        priority, event_type, title, notif_id,
     )
 
     return notif_id

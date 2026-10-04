@@ -2,7 +2,6 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from dateutil import parser as dateutil_parser
 from sqlalchemy import select
 
 from app.db import Reminder, async_session
@@ -10,17 +9,26 @@ from app.skills.base import Skill, register_skill
 
 logger = logging.getLogger(__name__)
 
+_ISO_EXAMPLE = "2026-09-30T07:00:00+00:00"
+_TIME_ERROR = (
+    f"time must be ISO 8601 with UTC offset, e.g. {_ISO_EXAMPLE}. "
+    "Use the current date and the '14 days' calendar in the system prompt to "
+    "compute the correct date, then append the UTC offset."
+)
+
 
 async def handle_set_reminder(text: str, time: str) -> dict:
+    from app.chat.pipeline import current_user_id
+    user_id = current_user_id()
     try:
-        remind_at = dateutil_parser.parse(time)
+        remind_at = datetime.fromisoformat(time)
     except (ValueError, OverflowError):
-        return {"success": False, "error": f"Could not parse time: {time}"}
+        return {"success": False, "error": _TIME_ERROR}
 
     if remind_at.tzinfo is None:
-        remind_at = remind_at.replace(tzinfo=timezone.utc)
+        return {"success": False, "error": _TIME_ERROR}
 
-    reminder = Reminder(text=text, remind_at=remind_at)
+    reminder = Reminder(user_id=user_id, text=text, remind_at=remind_at)
     async with async_session() as session:
         session.add(reminder)
         await session.commit()
@@ -29,7 +37,7 @@ async def handle_set_reminder(text: str, time: str) -> dict:
     try:
         from app.scheduler import schedule_reminder
 
-        schedule_reminder(reminder.id, remind_at, text)
+        schedule_reminder(reminder.id, remind_at, text, user_id)
     except Exception as e:
         logger.warning("Could not schedule reminder %d: %s", reminder.id, e)
 
@@ -41,10 +49,12 @@ async def handle_set_reminder(text: str, time: str) -> dict:
 
 
 async def handle_list_reminders() -> dict:
+    from app.chat.pipeline import current_user_id
+    user_id = current_user_id()
     async with async_session() as session:
         result = await session.execute(
             select(Reminder)
-            .where(Reminder.completed == False)
+            .where(Reminder.user_id == user_id, Reminder.completed == False)
             .order_by(Reminder.remind_at)
             .limit(20)
         )
@@ -65,7 +75,8 @@ async def handle_list_reminders() -> dict:
 register_skill(
     Skill(
         name="set_reminder",
-        description="Create a reminder for the user at a specific date/time. The time can be ISO 8601 or natural language like 'tomorrow at 3pm'.",
+        summary="Set a reminder",
+        description="Create a reminder for the user at a specific date/time.",
         parameters={
             "type": "object",
             "properties": {
@@ -75,7 +86,13 @@ register_skill(
                 },
                 "time": {
                     "type": "string",
-                    "description": "When to remind (ISO 8601 datetime or natural language)",
+                    "description": (
+                        "When to remind — ISO 8601 datetime with UTC offset "
+                        "(e.g. 2026-09-30T07:00:00+00:00). "
+                        "Use the '14 days' calendar in the system prompt to look up "
+                        "the exact date for relative expressions like 'tomorrow' or "
+                        "'next Friday', then append the UTC offset."
+                    ),
                 },
             },
             "required": ["text", "time"],
@@ -87,6 +104,7 @@ register_skill(
 register_skill(
     Skill(
         name="list_reminders",
+        summary="List reminders",
         description="List upcoming (not yet completed) reminders for the user.",
         parameters={
             "type": "object",

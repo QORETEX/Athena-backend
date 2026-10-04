@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -17,7 +18,7 @@ try:
     CHROMA_AVAILABLE = True
     logger.info("ChromaDB loaded — memory enabled")
 except ImportError:
-    logger.warning("ChromaDB not available — memory disabled")
+    logger.info("ChromaDB not available — memory disabled")
 
 
 class MemoryStore:
@@ -67,7 +68,8 @@ class MemoryStore:
         doc_id = str(uuid.uuid4())
 
         try:
-            collection.add(
+            await asyncio.to_thread(
+                collection.add,
                 documents=[text],
                 metadatas=[meta],
                 ids=[doc_id],
@@ -87,12 +89,14 @@ class MemoryStore:
         collection = self._long_term if long_term else self._short_term
 
         try:
-            if collection.count() == 0:
+            count = await asyncio.to_thread(collection.count)
+            if count == 0:
                 return []
 
-            results = collection.query(
+            results = await asyncio.to_thread(
+                collection.query,
                 query_texts=[query],
-                n_results=min(top_k, collection.count()),
+                n_results=min(top_k, count),
             )
             return results["documents"][0] if results["documents"] else []
         except Exception:
@@ -120,18 +124,21 @@ class MemoryStore:
                 datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
             ).isoformat()
 
-            all_data = self._short_term.get(include=["metadatas"])
+            all_data = await asyncio.to_thread(
+                self._short_term.get,
+                include=["metadatas"],
+            )
             if not all_data["ids"]:
                 return
 
-            ids_to_delete = []
-            for doc_id, meta in zip(all_data["ids"], all_data["metadatas"]):
-                ts = meta.get("timestamp", "")
-                if ts and ts < cutoff:
-                    ids_to_delete.append(doc_id)
+            ids_to_delete = [
+                doc_id
+                for doc_id, meta in zip(all_data["ids"], all_data["metadatas"])
+                if meta.get("timestamp", "") < cutoff
+            ]
 
             if ids_to_delete:
-                self._short_term.delete(ids=ids_to_delete)
+                await asyncio.to_thread(self._short_term.delete, ids=ids_to_delete)
                 logger.info("Cleaned up %d expired short-term memories", len(ids_to_delete))
         except Exception:
             logger.exception("Short-term memory cleanup failed")
