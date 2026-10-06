@@ -81,7 +81,7 @@ class ClaudeLLM:
             groq = get_groq_llm()
             if groq.available:
                 logger.info("🔄 Using Groq (Claude unavailable)")
-                response = await groq.chat(messages, max_tokens=max_tokens)
+                response = await groq.chat(messages, tools=tools, max_tokens=max_tokens)
                 return response
         except Exception as e:
             logger.debug(f"Groq failed ({e}), trying NVIDIA")

@@ -30,17 +30,19 @@ class GroqLLM:
     async def chat(
         self,
         messages: list[dict],
+        tools: Optional[list[dict]] = None,
         max_tokens: int = 2000,
         temperature: float = 0.7,
     ) -> dict:
         """
-        Chat with Groq API with retry logic
+        Chat with Groq API with retry logic and tool support
 
         Returns format compatible with Claude/Ollama:
         {
             "message": {
                 "role": "assistant",
-                "content": "response text"
+                "content": "response text",
+                "tool_calls": [...]  # if tools were called
             }
         }
         """
@@ -53,18 +55,26 @@ class GroqLLM:
         for attempt in range(max_retries + 1):
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
+                    # Build request payload
+                    payload = {
+                        "model": self.model,
+                        "messages": messages,
+                        "max_tokens": max_tokens,
+                        "temperature": temperature,
+                    }
+
+                    # Add tools if provided (OpenAI function calling format)
+                    if tools:
+                        payload["tools"] = tools
+                        payload["tool_choice"] = "auto"
+
                     response = await client.post(
                         "https://api.groq.com/openai/v1/chat/completions",
                         headers={
                             "Authorization": f"Bearer {self.api_key}",
                             "Content-Type": "application/json",
                         },
-                        json={
-                            "model": self.model,
-                            "messages": messages,
-                            "max_tokens": max_tokens,
-                            "temperature": temperature,
-                        },
+                        json=payload,
                     )
 
                     response.raise_for_status()
@@ -73,20 +83,24 @@ class GroqLLM:
                     # Get content from either content or reasoning field
                     # (reasoning models put response in 'reasoning' field)
                     message = data["choices"][0]["message"]
-                    content = message.get("content") or message.get("reasoning", "")
+                    content = message.get("content") or message.get("reasoning", "") or ""
 
-                    # If still empty, log the full response for debugging
-                    if not content:
-                        logger.warning(f"Groq returned empty response: {data}")
-                        content = "I apologize, but I couldn't generate a response. Please try again."
+                    # Check for tool calls
+                    tool_calls = message.get("tool_calls")
 
                     # Convert to our standard format
-                    return {
+                    result = {
                         "message": {
                             "role": "assistant",
                             "content": content,
                         }
                     }
+
+                    # Add tool calls if present
+                    if tool_calls:
+                        result["message"]["tool_calls"] = tool_calls
+
+                    return result
 
             except httpx.HTTPStatusError as e:
                 # Retry on 400/500 errors (common on first request after startup)

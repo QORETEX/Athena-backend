@@ -1,0 +1,459 @@
+[
+  {
+    "name": "search_contacts",
+    "description": "Search for contacts by name, phone number, or email",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query (name, phone, or email)"
+        }
+      },
+      "required": ["query"]
+    }
+  },
+  {
+    "name": "get_contact_details",
+    "description": "Get detailed information about a specific contact",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "contact_id": {
+          "type": "string",
+          "description": "Contact identifier"
+        }
+      },
+      "required": ["contact_id"]
+    }
+  },
+  {
+    "name": "make_call",
+    "description": "Initiate a phone call to a number",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "phone_number": {
+          "type": "string",
+          "description": "Phone number to call"
+        }
+      },
+      "required": ["phone_number"]
+    }
+  },
+  {
+    "name": "get_call_history",
+    "description": "Get recent call history",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "description": "Number of recent calls to retrieve",
+          "default": 10
+        }
+      }
+    }
+  },
+  {
+    "name": "send_sms",
+    "description": "Send an SMS text message",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "phone_number": {
+          "type": "string",
+          "description": "Recipient phone number"
+        },
+        "message": {
+          "type": "string",
+          "description": "Message content"
+        }
+      },
+      "required": ["phone_number", "message"]
+    }
+  },
+  {
+    "name": "get_messages",
+    "description": "Get recent SMS/MMS messages",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "description": "Number of messages to retrieve",
+          "default": 20
+        },
+        "contact_id": {
+          "type": "string",
+          "description": "Filter by specific contact (optional)"
+        }
+      }
+    }
+  },
+  {
+    "name": "get_unread_messages",
+    "description": "Get all unread messages",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "open_app",
+    "description": "Open a specific application on the device",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "app_name": {
+          "type": "string",
+          "description": "Name or package identifier of the app"
+        }
+      },
+      "required": ["app_name"]
+    }
+  },
+  {
+    "name": "search_apps",
+    "description": "Search for installed applications",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "App name search query"
+        }
+      },
+      "required": ["query"]
+    }
+  },
+  {
+    "name": "get_installed_apps",
+    "description": "List all installed applications",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "set_alarm",
+    "description": "Set an alarm for a specific time",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "time": {
+          "type": "string",
+          "description": "Alarm time in HH:MM format (24-hour)"
+        },
+        "label": {
+          "type": "string",
+          "description": "Optional label for the alarm"
+        }
+      },
+      "required": ["time"]
+    }
+  },
+  {
+    "name": "set_timer",
+    "description": "Set a countdown timer",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "seconds": {
+          "type": "integer",
+          "description": "Timer duration in seconds"
+        },
+        "label": {
+          "type": "string",
+          "description": "Optional label for the timer"
+        }
+      },
+      "required": ["seconds"]
+    }
+  },
+  {
+    "name": "get_location",
+    "description": "Get the device's current GPS location",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "high_accuracy": {
+          "type": "boolean",
+          "description": "Use high accuracy GPS (may take longer)",
+          "default": false
+        }
+      }
+    }
+  },
+  {
+    "name": "navigate_to",
+    "description": "Open navigation to a destination",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "destination": {
+          "type": "string",
+          "description": "Destination address or place name"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["driving", "walking", "transit", "cycling"],
+          "description": "Navigation mode",
+          "default": "driving"
+        }
+      },
+      "required": ["destination"]
+    }
+  },
+  {
+    "name": "take_photo",
+    "description": "Capture a photo using the device camera",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "camera": {
+          "type": "string",
+          "enum": ["front", "back"],
+          "description": "Which camera to use",
+          "default": "back"
+        }
+      }
+    }
+  },
+  {
+    "name": "search_photos",
+    "description": "Search photos in the device gallery",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query (date, location, or content)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Max number of results",
+          "default": 20
+        }
+      },
+      "required": ["query"]
+    }
+  },
+  {
+    "name": "get_recent_photos",
+    "description": "Get recently taken photos",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "description": "Number of photos to retrieve",
+          "default": 10
+        }
+      }
+    }
+  },
+  {
+    "name": "set_volume",
+    "description": "Set device volume level",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "integer",
+          "description": "Volume level (0-100)",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "stream": {
+          "type": "string",
+          "enum": ["media", "ring", "alarm", "notification"],
+          "description": "Audio stream to adjust",
+          "default": "media"
+        }
+      },
+      "required": ["level"]
+    }
+  },
+  {
+    "name": "get_volume",
+    "description": "Get current device volume levels",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "set_brightness",
+    "description": "Set screen brightness level",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "integer",
+          "description": "Brightness level (0-100)",
+          "minimum": 0,
+          "maximum": 100
+        }
+      },
+      "required": ["level"]
+    }
+  },
+  {
+    "name": "get_brightness",
+    "description": "Get current screen brightness level",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "toggle_wifi",
+    "description": "Turn WiFi on or off",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "True to enable, false to disable"
+        }
+      },
+      "required": ["enabled"]
+    }
+  },
+  {
+    "name": "get_wifi_status",
+    "description": "Get WiFi connection status and available networks",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "toggle_bluetooth",
+    "description": "Turn Bluetooth on or off",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "True to enable, false to disable"
+        }
+      },
+      "required": ["enabled"]
+    }
+  },
+  {
+    "name": "get_bluetooth_devices",
+    "description": "List paired and available Bluetooth devices",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_battery_status",
+    "description": "Get device battery level and charging status",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "play_media",
+    "description": "Play media (music, podcast, etc.)",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Song, artist, playlist, or podcast name"
+        },
+        "source": {
+          "type": "string",
+          "description": "Music app to use (e.g., Spotify, Apple Music)",
+          "default": "default"
+        }
+      },
+      "required": ["query"]
+    }
+  },
+  {
+    "name": "pause_media",
+    "description": "Pause currently playing media",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "skip_media",
+    "description": "Skip to next track",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_media_status",
+    "description": "Get currently playing media information",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "create_note",
+    "description": "Create a note on the device",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Note title"
+        },
+        "content": {
+          "type": "string",
+          "description": "Note content"
+        }
+      },
+      "required": ["content"]
+    }
+  },
+  {
+    "name": "search_notes",
+    "description": "Search notes on the device",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query"
+        }
+      },
+      "required": ["query"]
+    }
+  },
+  {
+    "name": "read_notification",
+    "description": "Read recent device notifications",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "description": "Number of notifications to retrieve",
+          "default": 10
+        }
+      }
+    }
+  },
+  {
+    "name": "get_device_info",
+    "description": "Get device information (model, OS version, etc.)",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  }
+]

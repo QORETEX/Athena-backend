@@ -26,6 +26,11 @@ async def lifespan(app: FastAPI):
     # Trigger skill registration
     import app.skills.registry  # noqa: F401
 
+    # Load device tools (client-executed)
+    from app.device_tools import load_device_tools
+
+    load_device_tools()
+
     # Load saved routines into scheduler
     from app.routines.engine import load_routines
 

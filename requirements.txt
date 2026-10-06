@@ -34,7 +34,7 @@ opencv-python==4.10.0.84
 
 # Audio Processing
 silero-vad==5.1.2
-rnnoise-python==1.0.2
+#rnnoise-python==1.0.2
 soundfile==0.12.1
 librosa==0.10.2.post1
 numpy>=1.24.4,<2.0
