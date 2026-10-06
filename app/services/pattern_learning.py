@@ -10,7 +10,8 @@ from typing import Optional
 
 from sqlalchemy import select
 
-from app.db import async_session, UserPattern
+from app.db import UserPattern
+import app.db
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ class PatternLearningService:
         Returns:
             Pattern ID
         """
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             # Check if pattern exists
             result = await session.execute(
                 select(UserPattern).where(
@@ -86,7 +87,7 @@ class PatternLearningService:
         pattern_key: str
     ) -> Optional[dict]:
         """Get a specific pattern"""
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             result = await session.execute(
                 select(UserPattern).where(
                     UserPattern.pattern_type == pattern_type,
@@ -113,7 +114,7 @@ class PatternLearningService:
         min_confidence: float = 0.5
     ) -> list[dict]:
         """Get all learned patterns"""
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             stmt = select(UserPattern).where(
                 UserPattern.confidence >= min_confidence
             )

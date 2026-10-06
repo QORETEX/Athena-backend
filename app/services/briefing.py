@@ -9,7 +9,8 @@ from typing import Optional
 
 from sqlalchemy import select
 
-from app.db import async_session, Reminder, Note, Meeting
+from app.db import Reminder, Note, Meeting
+import app.db
 from app.llm_claude import get_claude_llm
 
 logger = logging.getLogger(__name__)
@@ -95,7 +96,7 @@ class BriefingService:
 
     async def _get_todays_meetings(self) -> list[dict]:
         """Get meetings for today"""
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             now = datetime.now(timezone.utc)
             today_end = now.replace(hour=23, minute=59, second=59)
 
@@ -119,7 +120,7 @@ class BriefingService:
 
     async def _get_meetings_between(self, start: datetime, end: datetime) -> list[dict]:
         """Get meetings in date range"""
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             result = await session.execute(
                 select(Meeting).where(
                     Meeting.start_time >= start,
@@ -139,7 +140,7 @@ class BriefingService:
 
     async def _get_todays_reminders(self) -> list[dict]:
         """Get reminders for today"""
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             now = datetime.now(timezone.utc)
             today_end = now.replace(hour=23, minute=59, second=59)
 
@@ -162,7 +163,7 @@ class BriefingService:
 
     async def _get_reminders_between(self, start: datetime, end: datetime) -> list[dict]:
         """Get reminders in date range"""
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             result = await session.execute(
                 select(Reminder).where(
                     Reminder.remind_at >= start,
@@ -176,7 +177,7 @@ class BriefingService:
 
     async def _get_completed_reminders_today(self) -> list[dict]:
         """Get reminders completed today"""
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             now = datetime.now(timezone.utc)
             today_start = now.replace(hour=0, minute=0, second=0)
 
@@ -192,7 +193,7 @@ class BriefingService:
 
     async def _get_recent_notes(self) -> list[dict]:
         """Get recent important notes"""
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             yesterday = datetime.now(timezone.utc) - timedelta(days=1)
 
             result = await session.execute(

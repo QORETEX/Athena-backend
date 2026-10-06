@@ -12,7 +12,8 @@ from email.mime.text import MIMEText
 
 from sqlalchemy import select
 
-from app.db import async_session, Email
+from app.db import Email
+import app.db
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +161,7 @@ class EmailService:
 
     async def _store_email(self, email_data: dict) -> int:
         """Store email in database"""
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             # Check if already exists
             result = await session.execute(
                 select(Email).where(Email.email_id == email_data['email_id'])
@@ -210,7 +211,7 @@ class EmailService:
 
     async def get_urgent_emails(self) -> list[dict]:
         """Get urgent emails from database"""
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             result = await session.execute(
                 select(Email).where(
                     Email.is_urgent == True,
@@ -232,7 +233,7 @@ class EmailService:
 
     async def summarize_email(self, email_id: int) -> str:
         """Summarize email using Claude"""
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             result = await session.execute(
                 select(Email).where(Email.id == email_id)
             )

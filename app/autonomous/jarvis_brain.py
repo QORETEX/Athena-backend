@@ -16,7 +16,8 @@ from anthropic import AsyncAnthropic
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.db import async_session, Reminder, Note
+from app.db import Reminder, Note
+import app.db
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +134,7 @@ class JARVISBrain:
         from app.routes.context import get_phone_context
         phone_context = get_phone_context()
 
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             # Get upcoming reminders (next 2 hours)
             reminder_stmt = select(Reminder).where(
                 Reminder.completed == False,

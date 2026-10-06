@@ -11,7 +11,8 @@ from typing import Optional
 
 from sqlalchemy import select
 
-from app.db import async_session, Meeting
+from app.db import Meeting
+import app.db
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +139,7 @@ class CalendarService:
 
     async def _store_meeting(self, meeting_data: dict):
         """Store meeting in database"""
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             # Check if exists
             result = await session.execute(
                 select(Meeting).where(
@@ -172,7 +173,7 @@ class CalendarService:
 
     async def get_next_meeting(self) -> Optional[dict]:
         """Get next upcoming meeting"""
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             now = datetime.now(timezone.utc)
 
             result = await session.execute(
@@ -197,7 +198,7 @@ class CalendarService:
 
     async def prepare_meeting_brief(self, meeting_id: int) -> str:
         """Generate meeting preparation brief"""
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             result = await session.execute(
                 select(Meeting).where(Meeting.id == meeting_id)
             )

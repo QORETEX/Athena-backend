@@ -61,7 +61,8 @@ class Settings(BaseSettings):
     image_gen_enabled: bool = False
     stable_diffusion_model: str = "stabilityai/stable-diffusion-2-1"
     gemini_api_key: str = ""
-    gemini_image_model: str = "gemini-2.0-flash-exp"
+    gemini_image_model: str = "gemini-3.1-flash-lite-image"  # Nano Banana 2 Lite (cheapest)
+    gemini_model: str = "gemini-3.5-flash"  # Fast and free for chat/reasoning
 
     # Auth
     jwt_secret: str = "change-me-in-production"

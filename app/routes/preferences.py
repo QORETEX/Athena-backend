@@ -21,10 +21,10 @@ router = APIRouter(prefix="/api/preferences", tags=["preferences"])
 
 async def get_user_preferences() -> dict:
     """Load all user preferences as a flat dict. Safe to call from non-route code."""
-    from app.db import async_session
-    if async_session is None:
+    import app.db
+    if app.db.async_session is None:
         return {}
-    async with async_session() as session:
+    async with app.db.async_session() as session:
         result = await session.execute(select(UserPreference))
         return {row.key: row.value for row in result.scalars().all()}
 

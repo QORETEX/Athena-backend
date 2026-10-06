@@ -23,11 +23,11 @@ router = APIRouter(prefix="/api/briefing", tags=["briefing"])
 
 async def generate_briefing(db: Optional[AsyncSession] = None) -> dict:
     """Generate a comprehensive briefing. Can be called from routes or routines."""
-    from app.db import async_session as session_factory
+    import app.db
 
     own_session = False
-    if db is None and session_factory is not None:
-        db = session_factory()
+    if db is None and app.db.async_session is not None:
+        db = app.db.async_session()
         own_session = True
 
     briefing = {

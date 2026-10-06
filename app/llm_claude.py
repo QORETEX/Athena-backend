@@ -37,17 +37,18 @@ class ClaudeLLM:
         messages: list[dict],
         tools: Optional[list[dict]] = None,
         max_tokens: int = 2000,
-    ) -> dict:
+        stream: bool = False,
+    ):
         """
-        Chat with Claude, fallback to Groq/Ollama if unavailable
+        Chat with Claude, fallback to other LLMs if unavailable
 
-        Fallback order: Claude → Groq → Ollama
+        Fallback order: Claude → Groq → Gemini → NVIDIA → Ollama
 
         Returns same format as ollama chat_with_tools for compatibility
         """
         if not self.available or not self.client:
             logger.debug("Claude unavailable, trying fallback")
-            return await self._fallback_chat(messages, tools, max_tokens)
+            return await self._fallback_chat(messages, tools, max_tokens, stream)
 
         try:
             # Try Claude first
@@ -57,42 +58,56 @@ class ClaudeLLM:
         except Exception as e:
             logger.warning(f"Claude failed ({e}), trying fallback")
             # Fallback to Groq or Ollama
-            return await self._fallback_chat(messages, tools, max_tokens)
+            return await self._fallback_chat(messages, tools, max_tokens, stream)
 
     async def _fallback_chat(
         self,
         messages: list[dict],
         tools: Optional[list[dict]],
         max_tokens: int,
-    ) -> dict:
+        stream: bool = False,
+    ):
         """
-        Try fallback LLMs in order: Groq → NVIDIA → Ollama
+        Try fallback LLMs in order: Groq → Gemini → NVIDIA → Ollama
 
         Priority:
-        1. Groq - Fast and free (30 req/min)
-        2. NVIDIA NIM - Free, good quality
-        3. Ollama - Local, always available
+        1. Groq - Fast and free (30 req/min, resets quickly)
+        2. Gemini - Powerful reasoning (20 req/day)
+        3. NVIDIA NIM - Free, good quality
+        4. Ollama - Local, always available
         """
 
-        # Try Groq first (fastest, free)
+        # Try Groq first (fastest, free, resets quickly)
         try:
             from app.llm_groq import get_groq_llm
 
             groq = get_groq_llm()
             if groq.available:
                 logger.info("🔄 Using Groq (Claude unavailable)")
-                response = await groq.chat(messages, tools=tools, max_tokens=max_tokens)
+                response = await groq.chat(messages, tools=tools, max_tokens=max_tokens, stream=stream)
                 return response
         except Exception as e:
-            logger.debug(f"Groq failed ({e}), trying NVIDIA")
+            logger.debug(f"Groq failed ({e}), trying Gemini")
 
-        # Try NVIDIA NIM second (free, reliable)
+        # Try Gemini second (powerful reasoning but limited daily quota)
+        try:
+            from app.llm_gemini import get_gemini_llm
+
+            gemini = get_gemini_llm()
+            if gemini.available:
+                logger.info("🔄 Using Gemini (Claude & Groq unavailable)")
+                response = await gemini.chat(messages, tools=tools, max_tokens=max_tokens, stream=stream)
+                return response
+        except Exception as e:
+            logger.warning(f"Gemini failed ({e}), trying NVIDIA")
+
+        # Try NVIDIA NIM third (free, reliable)
         try:
             from app.llm_nvidia import get_nvidia_llm
 
             nvidia = get_nvidia_llm()
             if nvidia.available:
-                logger.info("🔄 Using NVIDIA NIM (Claude & Groq unavailable)")
+                logger.info("🔄 Using NVIDIA NIM (Claude, Groq & Gemini unavailable)")
                 response = await nvidia.chat(messages, max_tokens=max_tokens)
                 return response
         except Exception as e:

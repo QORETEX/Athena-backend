@@ -33,7 +33,8 @@ class GroqLLM:
         tools: Optional[list[dict]] = None,
         max_tokens: int = 2000,
         temperature: float = 0.7,
-    ) -> dict:
+        stream: bool = False,
+    ):
         """
         Chat with Groq API with retry logic and tool support
 
@@ -49,24 +50,36 @@ class GroqLLM:
         if not self.available:
             raise Exception("Groq API key not configured")
 
+        # Build request payload
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": stream,
+        }
+
+        # Add reasoning_effort for reasoning models (gpt-oss-120b)
+        # Only add when NOT streaming (reasoning+streaming has issues with tool calls)
+        if "gpt-oss" in self.model and not stream:
+            payload["reasoning_effort"] = "medium"
+
+        # Add tools if provided (OpenAI function calling format)
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+
+        # Handle streaming - return generator immediately
+        if stream:
+            return self._stream_response(payload)
+
+        # Non-streaming with retry logic
         max_retries = 2
         retry_delay = 1.0  # seconds
 
         for attempt in range(max_retries + 1):
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
-                    # Build request payload
-                    payload = {
-                        "model": self.model,
-                        "messages": messages,
-                        "max_tokens": max_tokens,
-                        "temperature": temperature,
-                    }
-
-                    # Add tools if provided (OpenAI function calling format)
-                    if tools:
-                        payload["tools"] = tools
-                        payload["tool_choice"] = "auto"
 
                     response = await client.post(
                         "https://api.groq.com/openai/v1/chat/completions",
@@ -115,6 +128,79 @@ class GroqLLM:
             except Exception as e:
                 logger.error(f"Groq API error: {e}")
                 raise
+
+    async def _stream_response(self, payload: dict):
+        """Stream response from Groq API"""
+        try:
+            logger.info("🌊 Creating HTTP client for streaming...")
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                logger.info("🌊 Starting stream request to Groq...")
+                async with client.stream(
+                    "POST",
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                ) as response:
+                    logger.info(f"🌊 Got response status: {response.status_code}")
+                    response.raise_for_status()
+
+                    # Parse SSE stream
+                    logger.info("🌊 Starting to iterate lines...")
+                    async for line in response.aiter_lines():
+                        logger.debug(f"🌊 Got line: {line[:100]}...")
+                        if not line or line.startswith(":"):
+                            continue
+
+                        if line.startswith("data: "):
+                            data_str = line[6:]  # Remove "data: " prefix
+
+                            if data_str == "[DONE]":
+                                break
+
+                            try:
+                                import json
+                                chunk = json.loads(data_str)
+                                delta = chunk.get("choices", [{}])[0].get("delta", {})
+
+                                # Yield content if present
+                                if "content" in delta:
+                                    yield {
+                                        "type": "content",
+                                        "content": delta["content"]
+                                    }
+
+                                # Yield reasoning if present
+                                if "reasoning" in delta:
+                                    yield {
+                                        "type": "reasoning",
+                                        "content": delta["reasoning"]
+                                    }
+
+                                # Yield tool calls if present
+                                if "tool_calls" in delta:
+                                    yield {
+                                        "type": "tool_calls",
+                                        "tool_calls": delta["tool_calls"]
+                                    }
+
+                            except json.JSONDecodeError:
+                                continue
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Groq streaming error: {e}")
+            yield {
+                "type": "error",
+                "error": f"HTTP {e.response.status_code}"
+            }
+        except Exception as e:
+            logger.error(f"Groq streaming error: {e}")
+            yield {
+                "type": "error",
+                "error": str(e)
+            }
 
 
 # Global instance

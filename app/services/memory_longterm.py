@@ -9,7 +9,8 @@ from typing import Optional
 
 from sqlalchemy import select, or_, func
 
-from app.db import async_session, LongTermMemory, ConversationLog
+from app.db import LongTermMemory, ConversationLog
+import app.db
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class LongTermMemoryService:
         Returns:
             Memory ID
         """
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             memory = LongTermMemory(
                 content=content,
                 memory_type=memory_type,
@@ -72,7 +73,7 @@ class LongTermMemoryService:
         Returns:
             List of matching memories
         """
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             # Simple keyword search (TODO: use embeddings for semantic search)
             stmt = select(LongTermMemory).where(
                 or_(
@@ -123,7 +124,7 @@ class LongTermMemoryService:
 
         Enables: "What did I say about the Johnson project last week?"
         """
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             from datetime import timedelta
             since = datetime.now(timezone.utc) - timedelta(days=days_back)
 
@@ -151,7 +152,7 @@ class LongTermMemoryService:
 
         Returns formatted string of recent interactions
         """
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             result = await session.execute(
                 select(ConversationLog)
                 .order_by(ConversationLog.timestamp.desc())
@@ -168,7 +169,7 @@ class LongTermMemoryService:
 
     async def forget(self, memory_id: int) -> bool:
         """Delete a memory"""
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             result = await session.execute(
                 select(LongTermMemory).where(LongTermMemory.id == memory_id)
             )
@@ -184,7 +185,7 @@ class LongTermMemoryService:
 
     async def get_memory_stats(self) -> dict:
         """Get memory statistics"""
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             total = await session.execute(select(func.count(LongTermMemory.id)))
             total_count = total.scalar()
 
@@ -205,7 +206,7 @@ class LongTermMemoryService:
 
     async def _get_oldest_memory(self) -> Optional[dict]:
         """Get oldest stored memory"""
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             result = await session.execute(
                 select(LongTermMemory).order_by(LongTermMemory.created_at.asc()).limit(1)
             )
@@ -220,7 +221,7 @@ class LongTermMemoryService:
 
     async def _get_most_accessed(self) -> Optional[dict]:
         """Get most frequently accessed memory"""
-        async with async_session() as session:
+        async with app.db.async_session() as session:
             result = await session.execute(
                 select(LongTermMemory)
                 .where(LongTermMemory.access_count > 0)

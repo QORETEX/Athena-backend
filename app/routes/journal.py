@@ -10,7 +10,8 @@ from fastapi import APIRouter, UploadFile, File, Form, Query, Path
 from pydantic import BaseModel
 from sqlalchemy import select, or_
 
-from app.db import async_session, JournalEntry
+from app.db import JournalEntry
+import app.db
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ Athena: "Entry saved. Tagged: work, success, API"
 """)
 async def create_journal_entry(entry: JournalEntryRequest):
     """Create a new journal entry"""
-    async with async_session() as session:
+    async with app.db.async_session() as session:
         # Extract key points using Claude
         key_points = await _extract_key_points(entry.content)
 
@@ -99,7 +100,7 @@ async def create_voice_journal_entry(
         return {"error": "Failed to transcribe audio"}
 
     # Create entry
-    async with async_session() as session:
+    async with app.db.async_session() as session:
         key_points = await _extract_key_points(transcript)
         mood = await _detect_mood(transcript)
 
@@ -142,7 +143,7 @@ async def list_journal_entries(
     days_back: int = Query(7, description="Days to look back", ge=1, le=365)
 ):
     """List journal entries"""
-    async with async_session() as session:
+    async with app.db.async_session() as session:
         since = datetime.now(timezone.utc) - timedelta(days=days_back)
 
         stmt = select(JournalEntry).where(
@@ -189,7 +190,7 @@ async def search_journal(
     limit: int = Query(10, description="Max results", ge=1, le=50)
 ):
     """Search journal entries"""
-    async with async_session() as session:
+    async with app.db.async_session() as session:
         stmt = select(JournalEntry).where(
             or_(
                 JournalEntry.content.ilike(f"%{query}%"),
@@ -229,7 +230,7 @@ async def get_journal_entry(
     entry_id: int = Path(..., description="Journal entry ID")
 ):
     """Get full journal entry"""
-    async with async_session() as session:
+    async with app.db.async_session() as session:
         result = await session.execute(
             select(JournalEntry).where(JournalEntry.id == entry_id)
         )
